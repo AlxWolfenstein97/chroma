@@ -136,6 +136,9 @@ bash ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/check.sh
   demonstration that Omarchy themes can drive libadwaita via user CSS, and
   the craft bar for merge-safe managed blocks, luma-distance on-accent text,
   and never-kill-a-window restarts.
+- [OMCP](https://github.com/btsouth/omarchy-omcp) — MCP desktop bridge (themes,
+  windows, screenshots, …). Helped build and iterate the preview here:
+  `omarchy plugin add https://github.com/btsouth/omarchy-omcp --enable`
 - [Omarchy](https://omarchy.org/) — theme pipeline, `theme-set` hooks, and
   the `gtk3` Qt platform theme this plugin deliberately stays aligned with.
 
