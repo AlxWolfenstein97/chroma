@@ -1,0 +1,105 @@
+#!/usr/bin/python3
+"""chroma-sync-root — copy staged GTK/Qt theme files into /root/.config.
+
+Must run as root (via sudo -n from chroma-apply, or manually with sudo/pkexec).
+Only copies paths listed in the stage manifest; never follows unexpected paths.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import pwd
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT_CONFIG = Path("/root/.config")
+ALLOWED_PREFIXES = (
+    "gtk-3.0/",
+    "gtk-4.0/",
+    "qt5ct/",
+    "qt6ct/",
+)
+
+
+def resolve_stage() -> Path:
+    env = os.environ.get("CHROMA_ROOT_STAGE")
+    if env:
+        return Path(env)
+
+    # sudo/pkexec reset HOME to /root — recover the invoking user's stage.
+    user = os.environ.get("SUDO_USER")
+    if not user and os.environ.get("PKEXEC_UID", "").isdigit():
+        try:
+            user = pwd.getpwuid(int(os.environ["PKEXEC_UID"])).pw_name
+        except KeyError:
+            user = None
+    if user:
+        try:
+            home = Path(pwd.getpwnam(user).pw_dir)
+            return home / ".local/share/chroma/root-sync"
+        except KeyError:
+            pass
+
+    homes = sorted(Path("/home").glob("*/.local/share/chroma/root-sync/manifest.json"))
+    if homes:
+        return homes[0].parent
+
+    return Path("/nonexistent")
+
+
+def atomic_copy(src: Path, dest: Path):
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(dest.parent), prefix=f".{dest.name}.")
+    os.close(fd)
+    tmp_path = Path(tmp)
+    try:
+        shutil.copy2(src, tmp_path)
+        os.chmod(tmp_path, 0o644)
+        os.replace(tmp_path, dest)
+    except BaseException:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def main() -> int:
+    if os.geteuid() != 0:
+        print("chroma-sync-root: must run as root (sudo -n ...)", file=sys.stderr)
+        return 1
+
+    stage = resolve_stage()
+    manifest_path = stage / "manifest.json"
+    if not manifest_path.is_file():
+        print(f"chroma-sync-root: no stage at {stage}", file=sys.stderr)
+        return 2
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"chroma-sync-root: bad manifest: {e}", file=sys.stderr)
+        return 2
+
+    copied = []
+    for rel in manifest.get("files") or []:
+        rel = str(rel).lstrip("/")
+        if ".." in rel.split("/") or not rel.startswith(ALLOWED_PREFIXES):
+            print(f"chroma-sync-root: refusing {rel}", file=sys.stderr)
+            continue
+        src = stage / rel
+        if not src.is_file():
+            continue
+        dest = ROOT_CONFIG / rel
+        atomic_copy(src, dest)
+        copied.append(rel)
+
+    print(f"chroma-sync-root: synced {len(copied)} files into {ROOT_CONFIG}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

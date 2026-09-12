@@ -1,0 +1,89 @@
+#!/usr/bin/python3
+"""chroma-link-root — one-time: point /root/.config GTK/Qt dirs at the user's.
+
+After this, every Chroma theme apply to ~/.config is what root sees too
+(pkexec BleachBit, sudo bleachbit, etc.) with no per-switch elevation.
+
+Must run as root. Invoking user is taken from SUDO_USER / PKEXEC_UID.
+"""
+
+from __future__ import annotations
+
+import os
+import pwd
+import sys
+from pathlib import Path
+
+TARGETS = ("gtk-3.0", "gtk-4.0", "qt6ct", "qt5ct")
+
+
+def invoking_home() -> Path:
+    user = os.environ.get("SUDO_USER")
+    if not user and os.environ.get("PKEXEC_UID", "").isdigit():
+        try:
+            user = pwd.getpwuid(int(os.environ["PKEXEC_UID"])).pw_name
+        except KeyError:
+            user = None
+    if not user:
+        print("chroma-link-root: cannot tell who invoked us", file=sys.stderr)
+        sys.exit(1)
+    try:
+        return Path(pwd.getpwnam(user).pw_dir)
+    except KeyError:
+        print(f"chroma-link-root: unknown user {user}", file=sys.stderr)
+        sys.exit(1)
+
+
+def main() -> int:
+    if os.geteuid() != 0:
+        print("chroma-link-root: must run as root", file=sys.stderr)
+        return 1
+
+    home = invoking_home()
+    src_base = home / ".config"
+    root_base = Path("/root/.config")
+    root_base.mkdir(parents=True, exist_ok=True)
+
+    linked = []
+    for name in TARGETS:
+        src = src_base / name
+        dest = root_base / name
+        src.mkdir(parents=True, exist_ok=True)
+
+        if dest.is_symlink() and dest.resolve() == src.resolve():
+            linked.append(f"{name}=already")
+            continue
+
+        if dest.exists() and not dest.is_symlink():
+            backup = dest.with_name(dest.name + ".chroma-prelink")
+            if not backup.exists():
+                dest.rename(backup)
+            else:
+                # Replace existing dir after one backup.
+                import shutil
+
+                shutil.rmtree(dest)
+
+        if dest.is_symlink() or dest.exists():
+            dest.unlink()
+
+        dest.symlink_to(src)
+        linked.append(f"{name}=linked")
+
+    # Marker the user session can see without reading /root.
+    marker = home / ".local/state/omarchy/chroma/root-linked"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(
+        "symlinks /root/.config/{gtk-3.0,gtk-4.0,qt6ct,qt5ct} → "
+        f"{src_base}/…\n",
+        encoding="utf-8",
+    )
+    # Clear the old "needs elevation every apply" flag.
+    (home / ".local/state/omarchy/chroma/root-needs-elevation").unlink(missing_ok=True)
+
+    print("chroma-link-root: " + ", ".join(linked))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

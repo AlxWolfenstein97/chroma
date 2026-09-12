@@ -1,0 +1,1132 @@
+#!/usr/bin/python3
+"""chroma-apply — full GTK3/GTK4 + Qt theming from the active Omarchy theme.
+
+Writes:
+  ~/.config/gtk-4.0/gtk.css          libadwaita @define-color palette
+  ~/.config/gtk-3.0/gtk.css          classic named colors (+ dialog polish)
+  ~/.config/gtk-{3,4}.0/settings.ini theme / prefer-dark / font
+  ~/.config/qt6ct/colors/omarchy.conf + qt6ct.conf   (when qt6ct is present)
+  ~/.config/qt5ct/...                                (when qt5ct is present)
+  ~/.local/share/chroma/root-sync/                   staging for root apps
+  ~/.local/state/omarchy/chroma/state.json
+
+Also sets GNOME color-scheme + gtk-theme (preferring adw-gtk3 when installed),
+pushes QT_QPA_PLATFORMTHEME into the user systemd/dbus environment when Qt CT
+is available, and optionally syncs the staged files into /root/.config so
+pkexec'd GUIs (BleachBit-as-root) and similar pick up the same palette.
+
+Exit: 0 applied/reverted; 3 nothing applied (bad theme input).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import tomllib
+from pathlib import Path
+
+HOME = Path.home()
+
+
+def _env_path(name: str, default: Path) -> Path:
+    v = os.environ.get(name)
+    return Path(v) if v else default
+
+
+def _state_default() -> Path:
+    base = os.environ.get("XDG_STATE_HOME")
+    return (Path(base) if base else HOME / ".local/state") / "omarchy/chroma"
+
+
+THEME_DIR = _env_path("CHROMA_THEME_DIR", HOME / ".local/state/omarchy/current/theme")
+GTK4_CSS = _env_path("CHROMA_GTK4_CSS", HOME / ".config/gtk-4.0/gtk.css")
+GTK3_CSS = _env_path("CHROMA_GTK3_CSS", HOME / ".config/gtk-3.0/gtk.css")
+GTK4_INI = _env_path("CHROMA_GTK4_INI", HOME / ".config/gtk-4.0/settings.ini")
+GTK3_INI = _env_path("CHROMA_GTK3_INI", HOME / ".config/gtk-3.0/settings.ini")
+QT6_DIR = _env_path("CHROMA_QT6_DIR", HOME / ".config/qt6ct")
+QT5_DIR = _env_path("CHROMA_QT5_DIR", HOME / ".config/qt5ct")
+STATE_DIR = _env_path("CHROMA_STATE_DIR", _state_default())
+ROOT_STAGE = _env_path(
+    "CHROMA_ROOT_STAGE",
+    Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share")) / "chroma/root-sync",
+)
+STATE_FILE = STATE_DIR / "state.json"
+NO_GSETTINGS = os.environ.get("CHROMA_NO_GSETTINGS") == "1"
+NO_ROOT = os.environ.get("CHROMA_NO_ROOT") == "1"
+NO_QT_ENV = os.environ.get("CHROMA_NO_QT_ENV") == "1"
+
+BEGIN = "/* >>> chroma:managed >>> generated from the active Omarchy theme; edits inside this block are overwritten */"
+END = "/* <<< chroma:managed <<< */"
+
+# Seed list — also auto-discovers --gapplication-service processes.
+RESTART_SEED = [
+    "nautilus", "geary", "gnome-calendar", "gnome-text-editor",
+    "loupe", "evince", "snapshot", "gnome-characters", "baobab",
+    "gnome-font-viewer", "eog", "file-roller",
+]
+
+HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+ENC = {"encoding": "utf-8", "errors": "surrogateescape"}
+
+
+def read_file(path: Path) -> str:
+    return path.read_text(**ENC)
+
+
+def atomic_write(path: Path, text: str, enc=None, mode: int = 0o644):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    kw = ENC if enc is None else enc
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".chroma-tmp"
+    )
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "w", **kw) as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def parse_hex(value):
+    if isinstance(value, str) and HEX_RE.match(value.strip()):
+        return value.strip().lower()
+    return None
+
+
+def luma(hex_color: str) -> float:
+    r, g, b = (int(hex_color[i : i + 2], 16) for i in (1, 3, 5))
+    return 0.299 * r + 0.587 * g + 0.114 * b
+
+
+def on_color(base: str, candidates: list[str]) -> tuple[str, int]:
+    base_l = luma(base)
+    best = max(candidates, key=lambda c: abs(luma(c) - base_l))
+    return best, round(abs(luma(best) - base_l))
+
+
+def mix(a: str, b: str, t: float) -> str:
+    """Linear mix of two #rrggbb colors; t=0 → a, t=1 → b."""
+    ar, ag, ab = (int(a[i : i + 2], 16) for i in (1, 3, 5))
+    br, bg, bb = (int(b[i : i + 2], 16) for i in (1, 3, 5))
+    r = round(ar + (br - ar) * t)
+    g = round(ag + (bg - ag) * t)
+    bl = round(ab + (bb - ab) * t)
+    return f"#{r:02x}{g:02x}{bl:02x}"
+
+
+def load_theme(theme_dir: Path):
+    toml_path = theme_dir / "colors.toml"
+    try:
+        with open(toml_path, "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        return None, f"cannot read {toml_path}: {e}"
+
+    def col(*keys):
+        for k in keys:
+            v = parse_hex(data.get(k))
+            if v:
+                return v
+        return None
+
+    background = col("background")
+    foreground = col("foreground")
+    accent = col("accent", "blue")
+    if not (background and foreground and accent):
+        return None, f"{toml_path} lacks background/foreground/accent"
+
+    return {
+        "mode": "light" if data.get("mode") == "light" else "dark",
+        "background": background,
+        "foreground": foreground,
+        "accent": accent,
+        "dark_background": col("dark_background", "background"),
+        "darker_background": col("darker_background", "dark_background", "background"),
+        "lighter_background": col("lighter_background", "background"),
+        "muted": col("muted", "dark_foreground", "foreground"),
+        "selection": col("selection", "lighter_background", "background"),
+        "red": col("red", "bright_red") or accent,
+        "green": col("green", "bright_green") or accent,
+        "yellow": col("yellow", "bright_yellow") or accent,
+        "magenta": col("magenta", "bright_magenta") or accent,
+        "blue": col("blue", "bright_blue") or accent,
+        "cyan": col("cyan", "bright_cyan") or accent,
+        "orange": col("orange", "yellow") or accent,
+        "bright_foreground": col("bright_foreground", "foreground"),
+        "dark_foreground": col("dark_foreground", "muted", "foreground"),
+    }, None
+
+
+def build_palette(t):
+    dark = t["mode"] == "dark"
+    if dark:
+        window_bg = t["background"]
+        view_bg = t["dark_background"]
+        headerbar_bg = t["darker_background"]
+        surface_bg = t["lighter_background"]
+        sidebar_bg = t["dark_background"]
+    else:
+        window_bg = t["dark_background"]
+        view_bg = t["background"]
+        headerbar_bg = t["darker_background"]
+        surface_bg = t["background"]
+        sidebar_bg = t["dark_background"]
+
+    fg = t["foreground"]
+    on_accent, separation = on_color(t["accent"], [t["background"], t["foreground"]])
+    shade = "rgba(0, 0, 0, 0.36)" if dark else "rgba(0, 0, 6, 0.07)"
+    border = mix(window_bg, fg, 0.18 if dark else 0.22)
+
+    return {
+        "mode": t["mode"],
+        "window_bg": window_bg,
+        "view_bg": view_bg,
+        "headerbar_bg": headerbar_bg,
+        "surface_bg": surface_bg,
+        "sidebar_bg": sidebar_bg,
+        "fg": fg,
+        "accent": t["accent"],
+        "on_accent": on_accent,
+        "separation": separation,
+        "muted": t["muted"],
+        "selection": t["selection"],
+        "shade": shade,
+        "border": border,
+        "red": t["red"],
+        "green": t["green"],
+        "yellow": t["yellow"],
+        "orange": t["orange"],
+        "on_red": on_color(t["red"], [t["background"], t["foreground"]])[0],
+        "on_green": on_color(t["green"], [t["background"], t["foreground"]])[0],
+        "on_yellow": on_color(t["yellow"], [t["background"], t["foreground"]])[0],
+        "magenta": t["magenta"],
+        "blue": t["blue"],
+        "cyan": t["cyan"],
+        "bright_fg": t["bright_foreground"],
+        "dark_fg": t["dark_foreground"],
+        "background": t["background"],
+        "foreground": t["foreground"],
+    }
+
+
+def gtk4_defines(p):
+    return {
+        "accent_bg_color": p["accent"],
+        "accent_fg_color": p["on_accent"],
+        "accent_color": p["accent"],
+        "destructive_bg_color": p["red"],
+        "destructive_fg_color": p["on_red"],
+        "destructive_color": p["red"],
+        "success_bg_color": p["green"],
+        "success_fg_color": p["on_green"],
+        "success_color": p["green"],
+        "warning_bg_color": p["yellow"],
+        "warning_fg_color": p["on_yellow"],
+        "warning_color": p["yellow"],
+        "error_bg_color": p["red"],
+        "error_fg_color": p["on_red"],
+        "error_color": p["red"],
+        "window_bg_color": p["window_bg"],
+        "window_fg_color": p["fg"],
+        "view_bg_color": p["view_bg"],
+        "view_fg_color": p["fg"],
+        "headerbar_bg_color": p["headerbar_bg"],
+        "headerbar_fg_color": p["fg"],
+        "headerbar_border_color": p["fg"],
+        "headerbar_backdrop_color": p["window_bg"],
+        "headerbar_shade_color": p["shade"],
+        "headerbar_darker_shade_color": p["shade"],
+        "sidebar_bg_color": p["sidebar_bg"],
+        "sidebar_fg_color": p["fg"],
+        "sidebar_backdrop_color": p["window_bg"],
+        "sidebar_shade_color": p["shade"],
+        "sidebar_border_color": p["shade"],
+        "secondary_sidebar_bg_color": p["sidebar_bg"],
+        "secondary_sidebar_fg_color": p["fg"],
+        "secondary_sidebar_backdrop_color": p["window_bg"],
+        "secondary_sidebar_shade_color": p["shade"],
+        "secondary_sidebar_border_color": p["shade"],
+        "card_bg_color": p["surface_bg"],
+        "card_fg_color": p["fg"],
+        "card_shade_color": p["shade"],
+        "dialog_bg_color": p["surface_bg"],
+        "dialog_fg_color": p["fg"],
+        "popover_bg_color": p["surface_bg"],
+        "popover_fg_color": p["fg"],
+        "popover_shade_color": p["shade"],
+        "thumbnail_bg_color": p["surface_bg"],
+        "thumbnail_fg_color": p["fg"],
+        "shade_color": p["shade"],
+        "scrollbar_outline_color": p["shade"],
+    }
+
+
+def gtk3_defines(p):
+    return {
+        "theme_bg_color": p["window_bg"],
+        "theme_fg_color": p["fg"],
+        "theme_base_color": p["view_bg"],
+        "theme_text_color": p["fg"],
+        "theme_selected_bg_color": p["accent"],
+        "theme_selected_fg_color": p["on_accent"],
+        "theme_unfocused_bg_color": p["window_bg"],
+        "theme_unfocused_fg_color": p["fg"],
+        "theme_unfocused_base_color": p["view_bg"],
+        "theme_unfocused_text_color": p["fg"],
+        "theme_unfocused_selected_bg_color": p["accent"],
+        "theme_unfocused_selected_fg_color": p["on_accent"],
+        "insensitive_bg_color": p["window_bg"],
+        "insensitive_fg_color": p["muted"],
+        "insensitive_base_color": p["view_bg"],
+        "borders": p["border"],
+        "unfocused_borders": p["border"],
+        "link_color": p["accent"],
+        "link_visited_color": p["magenta"],
+        "success_color": p["green"],
+        "warning_color": p["yellow"],
+        "error_color": p["red"],
+        # libadwaita-compat names so adw-gtk3 can share one stylesheet idea
+        "accent_bg_color": p["accent"],
+        "accent_fg_color": p["on_accent"],
+        "accent_color": p["accent"],
+        "window_bg_color": p["window_bg"],
+        "window_fg_color": p["fg"],
+        "view_bg_color": p["view_bg"],
+        "view_fg_color": p["fg"],
+        "headerbar_bg_color": p["headerbar_bg"],
+        "headerbar_fg_color": p["fg"],
+        "card_bg_color": p["surface_bg"],
+        "card_fg_color": p["fg"],
+        "dialog_bg_color": p["surface_bg"],
+        "dialog_fg_color": p["fg"],
+        "popover_bg_color": p["surface_bg"],
+        "popover_fg_color": p["fg"],
+        "destructive_bg_color": p["red"],
+        "destructive_fg_color": p["on_red"],
+        "success_bg_color": p["green"],
+        "success_fg_color": p["on_green"],
+        "warning_bg_color": p["yellow"],
+        "warning_fg_color": p["on_yellow"],
+        "error_bg_color": p["red"],
+        "error_fg_color": p["on_red"],
+    }
+
+
+def gtk_extra_css(p) -> str:
+    """Structural polish for dialogs / password prompts that ignore named colors."""
+    return f"""
+messagedialog, messagedialog.background {{
+  background-color: {p["surface_bg"]};
+  color: {p["fg"]};
+}}
+messagedialog label {{ color: {p["fg"]}; }}
+messagedialog button {{
+  background-color: {p["view_bg"]};
+  color: {p["fg"]};
+  border: 1px solid {p["border"]};
+}}
+messagedialog button:hover {{ background-color: {p["accent"]}; color: {p["on_accent"]}; }}
+alertdialog.background {{ background-color: {p["surface_bg"]}; color: {p["fg"]}; }}
+alertdialog .titlebar {{ background-color: {p["headerbar_bg"]}; color: {p["fg"]}; }}
+toast {{ background-color: {p["view_bg"]}; color: {p["fg"]}; }}
+"""
+
+
+def render_block(defines: dict, extra: str = "") -> str:
+    lines = [BEGIN]
+    lines += [f"@define-color {name} {value};" for name, value in defines.items()]
+    if extra.strip():
+        lines.append("")
+        lines.append(extra.rstrip())
+    lines.append(END)
+    return "\n".join(lines) + "\n"
+
+
+def find_block_span(text: str):
+    b = text.find(BEGIN)
+    if b < 0:
+        return None
+    e = text.find(END, b)
+    if e < 0:
+        return b, len(text)
+    e += len(END)
+    if e < len(text) and text[e] == "\n":
+        e += 1
+    return b, e
+
+
+def strip_block(text: str) -> str:
+    span = find_block_span(text)
+    if span is None:
+        return text
+    remainder = text[: span[0]] + text[span[1] :]
+    if remainder.startswith("\n"):
+        remainder = remainder[1:]
+    return remainder
+
+
+def write_managed(path: Path, block: str) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path = path.resolve() if path.exists() else path.parent.resolve() / path.name
+
+    if not path.exists():
+        atomic_write(path, block)
+        return "created"
+
+    text = read_file(path)
+    span = find_block_span(text)
+    if span is not None:
+        new = text[: span[0]] + block + text[span[1] :]
+        if new == text:
+            return "unchanged"
+        atomic_write(path, new)
+        return "updated"
+
+    backup = path.with_name(path.name + ".chroma-backup")
+    # Migrate Accord backups so uninstalling Accord then enabling Chroma
+    # still restores the user's original file on --revert.
+    accord_backup = path.with_name(path.name + ".accord-backup")
+    if not backup.exists() and accord_backup.exists():
+        shutil.copy2(accord_backup, backup)
+    if not backup.exists():
+        shutil.copy2(path, backup)
+    # Drop a leftover Accord managed block so we don't stack two generators.
+    text = re.sub(
+        r"/\* >>> accord:managed >>>.*?/\* <<< accord:managed <<< \*/\n?",
+        "",
+        text,
+        flags=re.S,
+    )
+    atomic_write(path, block + "\n" + text)
+    return "merged"
+
+
+def revert_file(path: Path):
+    if path.exists():
+        path = path.resolve()
+    backup = path.with_name(path.name + ".chroma-backup")
+
+    if backup.exists():
+        backup_text = read_file(backup)
+        if path.exists():
+            remainder = strip_block(read_file(path))
+            if remainder != backup_text:
+                atomic_write(path, remainder)
+                return "stripped-kept-backup"
+        atomic_write(path, backup_text)
+        backup.unlink()
+        return "restored-backup"
+
+    if not path.exists():
+        return "absent"
+    text = read_file(path)
+    if BEGIN not in text:
+        return "untouched"
+    remainder = strip_block(text)
+    if remainder.strip() == "":
+        path.unlink()
+        return "removed"
+    atomic_write(path, remainder)
+    return "stripped"
+
+
+def theme_available(name: str) -> bool:
+    for base in (
+        Path("/usr/share/themes"),
+        HOME / ".local/share/themes",
+        HOME / ".themes",
+    ):
+        if (base / name).is_dir():
+            return True
+    return False
+
+
+def pick_gtk_theme(mode: str) -> str:
+    if mode == "light":
+        for candidate in ("adw-gtk3", "Adwaita"):
+            if theme_available(candidate) or candidate == "Adwaita":
+                return candidate
+    for candidate in ("adw-gtk3-dark", "Adwaita-dark"):
+        if theme_available(candidate) or candidate.startswith("Adwaita"):
+            return candidate
+    return "Adwaita-dark" if mode == "dark" else "Adwaita"
+
+
+def current_font() -> str:
+    try:
+        out = subprocess.run(
+            ["omarchy", "font", "current"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return f"{out.stdout.strip()} 11"
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        out = subprocess.run(
+            ["gsettings", "get", "org.gnome.desktop.interface", "font-name"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip().strip("'")
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return "Adwaita Sans 11"
+
+
+def write_settings_ini(path: Path, gtk_theme: str, mode: str, font: str) -> str:
+    # Deliberately omit icon/cursor keys — Omarchy's theme-set-gnome owns
+    # those via gsettings / icons.theme. Writing them here made Chroma look
+    # like an icon engine and could diverge from the live gsettings value.
+    prefer_dark = "1" if mode == "dark" else "0"
+    body = (
+        "[Settings]\n"
+        f"gtk-theme-name={gtk_theme}\n"
+        f"gtk-application-prefer-dark-theme={prefer_dark}\n"
+        f"gtk-font-name={font}\n"
+    )
+
+    marker = "# chroma:managed\n"
+    content = marker + body
+    existed = path.exists()
+    if existed:
+        prev = read_file(path)
+        if prev == content:
+            return "unchanged"
+    atomic_write(path, content)
+    return "updated" if existed else "created"
+
+
+def qt_argb(hex_color: str, alpha: str = "ff") -> str:
+    return f"#{alpha}{hex_color[1:]}"
+
+
+def render_qt_colors(p) -> str:
+    """qt5ct/qt6ct ColorScheme with 21 roles (active/disabled/inactive)."""
+    window = p["window_bg"]
+    base = p["view_bg"]
+    alt = p["surface_bg"]
+    button = mix(window, p["fg"], 0.08)
+    mid = mix(window, p["fg"], 0.16)
+    dark = mix(window, "#000000", 0.35)
+    light = mix(window, "#ffffff", 0.12)
+    text = p["fg"]
+    bright = p["bright_fg"]
+    muted = p["muted"]
+    highlight = p["accent"]
+    hi_text = p["on_accent"]
+    link = p["accent"]
+    visited = p["magenta"]
+    tooltip_bg = p["surface_bg"]
+    tooltip_fg = p["fg"]
+    placeholder = muted
+
+    def row(fg, btn, midlight, dark_c, mid_c, text_c, bright_c, btn_text, base_c,
+            window_c, shadow, hl, hl_text, link_c, visited_c, alt_c, placeholder_c,
+            tooltip_b, tooltip_f, window_text=None, window_alpha="ff"):
+        wt = window_text or fg
+        return ", ".join([
+            qt_argb(fg), qt_argb(btn), qt_argb(light), qt_argb(midlight),
+            qt_argb(dark_c), qt_argb(mid_c), qt_argb(text_c), qt_argb(bright_c),
+            qt_argb(btn_text), qt_argb(base_c), qt_argb(window_c, window_alpha),
+            qt_argb(shadow), qt_argb(hl), qt_argb(hl_text), qt_argb(link_c),
+            qt_argb(visited_c), qt_argb(alt_c), qt_argb(placeholder_c),
+            qt_argb(tooltip_b), qt_argb(tooltip_f), qt_argb(wt, "8f"),
+        ])
+
+    active = row(text, button, mid, dark, mid, text, bright, text, base, window,
+                 dark, highlight, hi_text, link, visited, alt, placeholder,
+                 tooltip_bg, tooltip_fg)
+    disabled = row(muted, button, mid, dark, mid, muted, muted, muted, base, window,
+                   dark, highlight, hi_text, link, visited, alt, placeholder,
+                   tooltip_bg, muted)
+    inactive = row(muted, button, mid, dark, mid, text, bright, text, base, window,
+                   dark, highlight, hi_text, link, visited, alt, placeholder,
+                   tooltip_bg, tooltip_fg)
+
+    return (
+        "[ColorScheme]\n"
+        f"active_colors={active}\n"
+        f"disabled_colors={disabled}\n"
+        f"inactive_colors={inactive}\n"
+    )
+
+
+def write_qtct(qt_dir: Path, p, conf_name: str) -> dict:
+    if not shutil.which(conf_name):
+        return {"status": "skipped", "reason": f"{conf_name} not installed"}
+
+    colors_dir = qt_dir / "colors"
+    colors_dir.mkdir(parents=True, exist_ok=True)
+    colors_path = colors_dir / "omarchy.conf"
+    colors_body = render_qt_colors(p)
+    if colors_path.exists() and read_file(colors_path) == colors_body:
+        color_status = "unchanged"
+    else:
+        atomic_write(colors_path, colors_body)
+        color_status = "updated"
+
+    conf_path = qt_dir / f"{conf_name}.conf"
+    # Preserve unknown keys; ensure our palette + fusion style.
+    existing = read_file(conf_path) if conf_path.exists() else ""
+    lines = existing.splitlines()
+    sections: dict[str, dict[str, str]] = {}
+    order: list[str] = []
+    current = None
+    for line in lines:
+        if line.startswith("[") and line.endswith("]"):
+            current = line[1:-1]
+            if current not in sections:
+                sections[current] = {}
+                order.append(current)
+            continue
+        if current and "=" in line and not line.strip().startswith("#"):
+            k, _, v = line.partition("=")
+            sections[current][k.strip()] = v.strip()
+
+    for sec in ("Appearance", "Fonts", "Interface"):
+        if sec not in sections:
+            sections[sec] = {}
+            order.append(sec)
+
+    sections["Appearance"]["color_scheme_path"] = str(colors_path)
+    sections["Appearance"]["custom_palette"] = "true"
+    sections["Appearance"].setdefault("standard_dialogs", "default")
+    sections["Appearance"].setdefault("style", "Fusion")
+    font = current_font()
+    # qtct wants "Family,size,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"
+    family = font.rsplit(" ", 1)[0]
+    try:
+        size = int(font.rsplit(" ", 1)[1])
+    except (ValueError, IndexError):
+        size = 11
+    font_spec = f"{family},{size},-1,5,400,0,0,0,0,0,0,0,0,0,0,1"
+    sections["Fonts"]["fixed"] = font_spec
+    sections["Fonts"]["general"] = font_spec
+
+    out_lines = []
+    for sec in order:
+        out_lines.append(f"[{sec}]")
+        for k, v in sections[sec].items():
+            out_lines.append(f"{k}={v}")
+        out_lines.append("")
+    new_body = "\n".join(out_lines).rstrip() + "\n"
+    if existing == new_body:
+        conf_status = "unchanged"
+    else:
+        atomic_write(conf_path, new_body)
+        conf_status = "updated"
+
+    return {
+        "status": "ok",
+        "colors": color_status,
+        "conf": conf_status,
+        "path": str(conf_path),
+        "colors_path": str(colors_path),
+    }
+
+
+def push_qt_env(enabled: bool) -> str:
+    """Keep Omarchy's QT_QPA_PLATFORMTHEME=gtk3.
+
+    Forcing qt6ct made Quickshell (the Omarchy shell) resolve icon names
+    differently: the launcher only indexes apps/ + devices/, and Qt's
+    themed fallback for places/mimetypes icons got weaker under qt6ct.
+    Accord-style gtk3 inheritance is the conservative path.
+    """
+    if NO_QT_ENV:
+        return "skipped"
+    value = "gtk3"
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "set-environment", f"QT_QPA_PLATFORMTHEME={value}"],
+            capture_output=True,
+            timeout=10,
+        )
+        subprocess.run(
+            ["dbus-update-activation-environment", "--systemd", "QT_QPA_PLATFORMTHEME"],
+            capture_output=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "failed"
+
+    env_dir = HOME / ".config/environment.d"
+    env_file = env_dir / "99-chroma-qt.conf"
+    # Remove any leftover override; Omarchy defaults already set gtk3.
+    if env_file.exists():
+        env_file.unlink()
+    return value
+
+
+def gsettings_get(key: str):
+    try:
+        out = subprocess.run(
+            ["gsettings", "get", "org.gnome.desktop.interface", key],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return out.stdout.strip().strip("'") if out.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def gsettings_set(key: str, value: str) -> bool:
+    try:
+        return (
+            subprocess.run(
+                ["gsettings", "set", "org.gnome.desktop.interface", key, value],
+                capture_output=True,
+                timeout=10,
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def display_name(theme_dir: Path) -> str:
+    try:
+        name = (theme_dir.parent / "theme.name").read_text(encoding="utf-8").strip()
+    except OSError:
+        name = ""
+    if not name:
+        name = theme_dir.resolve().name
+    return re.sub(r"[^A-Za-z0-9 _.-]", "-", name)[:64]
+
+
+def load_state():
+    try:
+        with open(STATE_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_state(state: dict):
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        atomic_write(
+            STATE_FILE,
+            json.dumps(state, indent=1) + "\n",
+            enc={"encoding": "utf-8"},
+        )
+        return True
+    except OSError as e:
+        print(f"chroma: cannot write {STATE_FILE}: {e}", file=sys.stderr)
+        return False
+
+
+def usable_saved(saved) -> bool:
+    return isinstance(saved, dict) and any(saved.values())
+
+
+def windowed_pids():
+    try:
+        out = subprocess.run(
+            ["hyprctl", "clients", "-j"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if out.returncode != 0:
+            return None
+        return {
+            c["pid"]
+            for c in json.loads(out.stdout)
+            if isinstance(c, dict) and c.get("pid")
+        }
+    except (
+        OSError,
+        subprocess.TimeoutExpired,
+        json.JSONDecodeError,
+        TypeError,
+        AttributeError,
+        KeyError,
+    ):
+        return None
+
+
+def running_pids(name: str) -> list[int]:
+    try:
+        out = subprocess.run(
+            ["pgrep", "-x", "-U", str(os.getuid()), name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if out.returncode != 0:
+        return []
+    return [int(p) for p in out.stdout.split() if p.isdigit()]
+
+
+def discover_service_apps() -> set[str]:
+    """Any user process advertising --gapplication-service is a GTK daemon."""
+    found: set[str] = set(RESTART_SEED)
+    try:
+        out = subprocess.run(
+            ["ps", "-u", str(os.getuid()), "-o", "comm=,args="],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return found
+    if out.returncode != 0:
+        return found
+    for line in out.stdout.splitlines():
+        if "--gapplication-service" not in line:
+            continue
+        parts = line.split(None, 1)
+        if parts:
+            comm = Path(parts[0]).name
+            if comm and len(comm) < 64:
+                found.add(comm)
+    return found
+
+
+def restart_apps():
+    names = discover_service_apps()
+    candidates = {name: pids for name in names if (pids := running_pids(name))}
+    # Always bounce the GTK portal so file choosers / settings pick up CSS.
+    portal_restarted = False
+    try:
+        subprocess.run(
+            ["pkill", "-u", str(os.getuid()), "-f", "xdg-desktop-portal-gtk"],
+            capture_output=True,
+            timeout=5,
+        )
+        portal_restarted = True
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+    if not candidates:
+        return (["xdg-desktop-portal-gtk"] if portal_restarted else []), []
+
+    visible = windowed_pids()
+    if visible is None:
+        return (["xdg-desktop-portal-gtk"] if portal_restarted else []), sorted(
+            candidates
+        )
+
+    restarted, pending = [], []
+    if portal_restarted:
+        restarted.append("xdg-desktop-portal-gtk")
+    for name, pids in candidates.items():
+        if any(p in visible for p in pids):
+            pending.append(name)
+            continue
+        for p in pids:
+            try:
+                os.kill(p, 15)
+            except OSError:
+                pass
+        restarted.append(name)
+    return restarted, pending
+
+
+def stage_root(files: dict[str, Path]):
+    """Mirror themed files into a staging tree for chroma-sync-root."""
+    ROOT_STAGE.mkdir(parents=True, exist_ok=True)
+    mirrored = []
+    for rel, src in files.items():
+        if not src.exists():
+            continue
+        dest = ROOT_STAGE / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        mirrored.append(rel)
+    manifest = {
+        "schemaVersion": 1,
+        "generatedAt": int(time.time()),
+        "files": mirrored,
+        "note": "Install sudoers via install.sh, then chroma-sync-root copies these into /root/.config",
+    }
+    atomic_write(
+        ROOT_STAGE / "manifest.json",
+        json.dumps(manifest, indent=2) + "\n",
+        enc={"encoding": "utf-8"},
+    )
+    return mirrored
+
+
+def try_sync_root() -> str:
+    """Root theming status.
+
+    Preferred setup is one-time symlinks (`chroma-link-root` via
+    `install.sh --with-root`): /root/.config/gtk-* → the user's, so every
+    apply is visible to pkexec/sudo GUIs with no further elevation.
+
+    Legacy path: passwordless `chroma-sync-root` copy on each change.
+    """
+    if NO_ROOT:
+        return "skipped"
+
+    linked = STATE_DIR / "root-linked"
+    if linked.exists():
+        return "linked"
+
+    sync = Path(__file__).resolve().parent / "chroma-sync-root"
+    if not sync.exists():
+        return "needs-link"
+
+    flag = STATE_DIR / "root-needs-elevation"
+    sudoers = Path("/etc/sudoers.d/chroma-sync-root")
+    if flag.exists() and not sudoers.exists():
+        return "needs-link"
+
+    try:
+        can = subprocess.run(
+            ["sudo", "-n", "true"],
+            capture_output=True,
+            timeout=5,
+        )
+        if can.returncode != 0 and not sudoers.exists():
+            STATE_DIR.mkdir(parents=True, exist_ok=True)
+            flag.write_text("run install.sh --with-root\n", encoding="utf-8")
+            return "needs-link"
+    except (OSError, subprocess.TimeoutExpired):
+        return "failed"
+
+    try:
+        probe = subprocess.run(
+            ["sudo", "-n", str(sync)],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if probe.returncode == 0:
+            flag.unlink(missing_ok=True)
+            return "synced"
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        flag.write_text("run install.sh --with-root\n", encoding="utf-8")
+        return "needs-link"
+    except (OSError, subprocess.TimeoutExpired):
+        return "failed"
+
+
+def do_revert() -> int:
+    state = load_state()
+    r4 = revert_file(GTK4_CSS)
+    r3 = revert_file(GTK3_CSS)
+    for ini in (GTK4_INI, GTK3_INI):
+        if ini.exists() and "# chroma:managed" in read_file(ini):
+            ini.unlink()
+    saved = state.get("gsettings", {}).get("saved") or {}
+    restored, failed = [], []
+    if not NO_GSETTINGS:
+        if usable_saved(saved):
+            for key, value in saved.items():
+                if not value:
+                    continue
+                (restored if gsettings_set(key, value) else failed).append(key)
+        else:
+            if shutil.which("omarchy-theme-set-gnome"):
+                try:
+                    if (
+                        subprocess.run(
+                            ["omarchy-theme-set-gnome"],
+                            capture_output=True,
+                            timeout=15,
+                        ).returncode
+                        == 0
+                    ):
+                        restored = ["via omarchy-theme-set-gnome"]
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+    push_qt_env(enabled=False)
+    if failed:
+        print(
+            f"chroma: reverted css (gtk4: {r4}, gtk3: {r3}) but could not "
+            f"restore gsettings: {', '.join(failed)}",
+            file=sys.stderr,
+        )
+        return 0
+    STATE_FILE.unlink(missing_ok=True)
+    gs = ", ".join(restored) if restored else "nothing to restore"
+    print(f"chroma: reverted (gtk4: {r4}, gtk3: {r3}, gsettings: {gs})")
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--no-restart", action="store_true")
+    ap.add_argument("--no-root", action="store_true")
+    ap.add_argument("--revert", action="store_true")
+    args = ap.parse_args()
+
+    if args.revert:
+        return do_revert()
+    if args.no_root:
+        global NO_ROOT
+        NO_ROOT = True
+
+    theme, err = load_theme(THEME_DIR)
+    if theme is None:
+        print(f"chroma: {err}; nothing applied", file=sys.stderr)
+        prev = load_state() or {"schemaVersion": 1}
+        prev["lastError"] = err
+        prev["lastErrorAt"] = int(time.time())
+        save_state(prev)
+        return 3
+
+    p = build_palette(theme)
+    theme_name = display_name(THEME_DIR)
+    gtk_theme = pick_gtk_theme(p["mode"])
+    font = current_font()
+
+    prev = load_state()
+    gsettings = {
+        "applied": False,
+        "saved": prev.get("gsettings", {}).get("saved"),
+    }
+    if not NO_GSETTINGS and not usable_saved(gsettings["saved"]):
+        captured = {
+            "color-scheme": gsettings_get("color-scheme"),
+            "gtk-theme": gsettings_get("gtk-theme"),
+        }
+        gsettings["saved"] = captured if usable_saved(captured) else None
+        if gsettings["saved"]:
+            early = dict(prev) if prev else {"schemaVersion": 1}
+            early["gsettings"] = {"applied": False, "saved": gsettings["saved"]}
+            save_state(early)
+
+    s4 = write_managed(GTK4_CSS, render_block(gtk4_defines(p), gtk_extra_css(p)))
+    s3 = write_managed(GTK3_CSS, render_block(gtk3_defines(p), gtk_extra_css(p)))
+    i4 = write_settings_ini(GTK4_INI, gtk_theme, p["mode"], font)
+    i3 = write_settings_ini(GTK3_INI, gtk_theme, p["mode"], font)
+
+    # Optional qt*ct colour files if those tools exist — never flip platform theme.
+    qt6 = write_qtct(QT6_DIR, p, "qt6ct") if shutil.which("qt6ct") else {"status": "skipped", "reason": "unused"}
+    qt5 = write_qtct(QT5_DIR, p, "qt5ct") if shutil.which("qt5ct") else {"status": "skipped", "reason": "unused"}
+    # Always reinforce Omarchy's gtk3 — undo any prior Chroma qt6ct override.
+    qt_env = push_qt_env(enabled=False)
+
+    if not NO_GSETTINGS:
+        scheme = "prefer-light" if p["mode"] == "light" else "prefer-dark"
+        # Theme-name bounce forces some GTK3 consumers to reload.
+        bounce = gtk_theme + "-chroma-bounce"
+        gsettings_set("gtk-theme", bounce)
+        ok1 = gsettings_set("color-scheme", scheme)
+        ok2 = gsettings_set("gtk-theme", gtk_theme)
+        gsettings.update(
+            {
+                "applied": ok1 and ok2,
+                "color_scheme": scheme,
+                "gtk_theme": gtk_theme,
+            }
+        )
+
+    changed = any(
+        s in ("created", "updated", "merged") for s in (s4, s3, i4, i3)
+    ) or qt6.get("colors") in ("updated", "created") or qt6.get("conf") in (
+        "updated",
+        "created",
+    )
+
+    restarted, pending = ([], [])
+    if not args.no_restart and changed:
+        restarted, pending = restart_apps()
+
+    staged = stage_root(
+        {
+            "gtk-4.0/gtk.css": GTK4_CSS,
+            "gtk-4.0/settings.ini": GTK4_INI,
+            "gtk-3.0/gtk.css": GTK3_CSS,
+            "gtk-3.0/settings.ini": GTK3_INI,
+            "qt6ct/qt6ct.conf": QT6_DIR / "qt6ct.conf",
+            "qt6ct/colors/omarchy.conf": QT6_DIR / "colors/omarchy.conf",
+            "qt5ct/qt5ct.conf": QT5_DIR / "qt5ct.conf",
+            "qt5ct/colors/omarchy.conf": QT5_DIR / "colors/omarchy.conf",
+        }
+    )
+    # Only attempt elevation plumbing when something themed changed, or we
+    # have never recorded a root status. Linked setups need no further work.
+    prev_root = (prev or {}).get("root", {}).get("status")
+    if prev_root == "linked" or (STATE_DIR / "root-linked").exists():
+        root_status = "linked"
+    elif changed or prev_root not in ("synced", "needs-link", "needs-elevation", "skipped"):
+        root_status = try_sync_root()
+    else:
+        root_status = prev_root or "skipped"
+
+    state = {
+        "schemaVersion": 1,
+        "generatedAt": int(time.time()),
+        "generatedAtIso": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "theme": theme_name,
+        "mode": p["mode"],
+        "palette": {
+            "window_bg": p["window_bg"],
+            "view_bg": p["view_bg"],
+            "headerbar_bg": p["headerbar_bg"],
+            "surface_bg": p["surface_bg"],
+            "sidebar_bg": p["sidebar_bg"],
+            "fg": p["fg"],
+            "accent": p["accent"],
+            "on_accent": p["on_accent"],
+            "separation": p["separation"],
+            "muted": p["muted"],
+            "red": p["red"],
+            "green": p["green"],
+            "yellow": p["yellow"],
+            "blue": p["blue"],
+            "cyan": p["cyan"],
+            "magenta": p["magenta"],
+        },
+        "files": {
+            "gtk4": {"path": str(GTK4_CSS), "status": s4},
+            "gtk3": {"path": str(GTK3_CSS), "status": s3},
+            "gtk4_ini": {"path": str(GTK4_INI), "status": i4},
+            "gtk3_ini": {"path": str(GTK3_INI), "status": i3},
+            "qt6": qt6,
+            "qt5": qt5,
+        },
+        "qt_platformtheme": qt_env,
+        "gsettings": gsettings,
+        "restarts": {"restarted": restarted, "pending": pending},
+        "root": {"status": root_status, "staged": staged, "stage": str(ROOT_STAGE)},
+    }
+    save_state(state)
+
+    bits = [
+        f"chroma: {theme_name} ({p['mode']})",
+        f"gtk4 {s4}",
+        f"gtk3 {s3}",
+        f"theme {gtk_theme}",
+    ]
+    if qt6.get("status") == "ok":
+        bits.append(f"qt6 {qt6.get('colors')}/{qt6.get('conf')}")
+    else:
+        bits.append("qt6 skipped")
+    bits.append(f"qt-env {qt_env}")
+    bits.append(f"root {root_status}")
+    if restarted:
+        bits.append("restarted " + ",".join(restarted))
+    if pending:
+        bits.append("pending " + ",".join(pending))
+    print(", ".join(bits))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

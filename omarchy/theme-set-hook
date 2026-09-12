@@ -1,0 +1,12 @@
+#!/bin/bash
+# chroma theme-set hook — run by omarchy at the end of every theme switch.
+# Quiet and non-fatal: never abort the theme switch.
+
+set -uo pipefail
+
+PLUGIN="${CHROMA_PLUGIN_DIR:-$HOME/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma}"
+APPLY="$PLUGIN/bin/chroma-apply"
+
+[[ -x $APPLY ]] || exit 0
+"$APPLY" >/dev/null 2>&1 || true
+exit 0
