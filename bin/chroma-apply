@@ -305,8 +305,25 @@ def gtk3_defines(p):
         "window_fg_color": p["fg"],
         "view_bg_color": p["view_bg"],
         "view_fg_color": p["fg"],
+        "content_view_bg": p["view_bg"],
         "headerbar_bg_color": p["headerbar_bg"],
         "headerbar_fg_color": p["fg"],
+        "headerbar_border_color": p["fg"],
+        "headerbar_backdrop_color": p["window_bg"],
+        "headerbar_shade_color": p["shade"],
+        # Lutris / portal file chooser / placessidebar (GTK3) read these —
+        # they were GTK4-only before, which is why Nautilus looked right and
+        # those sidebars stayed adw-gtk3's default grey.
+        "sidebar_bg_color": p["sidebar_bg"],
+        "sidebar_fg_color": p["fg"],
+        "sidebar_backdrop_color": p["window_bg"],
+        "sidebar_shade_color": p["shade"],
+        "sidebar_border_color": p["shade"],
+        "secondary_sidebar_bg_color": p["sidebar_bg"],
+        "secondary_sidebar_fg_color": p["fg"],
+        "secondary_sidebar_backdrop_color": p["window_bg"],
+        "secondary_sidebar_shade_color": p["shade"],
+        "secondary_sidebar_border_color": p["shade"],
         "card_bg_color": p["surface_bg"],
         "card_fg_color": p["fg"],
         "dialog_bg_color": p["surface_bg"],
@@ -321,11 +338,12 @@ def gtk3_defines(p):
         "warning_fg_color": p["on_yellow"],
         "error_bg_color": p["red"],
         "error_fg_color": p["on_red"],
+        "shade_color": p["shade"],
     }
 
 
 def gtk_extra_css(p) -> str:
-    """Structural polish for dialogs / password prompts that ignore named colors."""
+    """Structural polish for dialogs / sidebars that ignore named colors."""
     return f"""
 messagedialog, messagedialog.background {{
   background-color: {p["surface_bg"]};
@@ -341,6 +359,21 @@ messagedialog button:hover {{ background-color: {p["accent"]}; color: {p["on_acc
 alertdialog.background {{ background-color: {p["surface_bg"]}; color: {p["fg"]}; }}
 alertdialog .titlebar {{ background-color: {p["headerbar_bg"]}; color: {p["fg"]}; }}
 toast {{ background-color: {p["view_bg"]}; color: {p["fg"]}; }}
+
+/* GTK3 sidebars (Lutris, portal file chooser placessidebar) */
+.sidebar, stacksidebar.sidebar, placessidebar {{
+  background-color: {p["sidebar_bg"]};
+  color: {p["fg"]};
+}}
+.sidebar:backdrop, stacksidebar.sidebar:backdrop, placessidebar:backdrop {{
+  background-color: {p["window_bg"]};
+}}
+.sidebar list, placessidebar > viewport.frame {{
+  background-color: {p["sidebar_bg"]};
+}}
+placessidebar row {{
+  color: {p["fg"]};
+}}
 """
 
 
