@@ -112,8 +112,16 @@ omarchy plugin remove io.github.alxwolfenstein97.chroma
 
 ## Limits, honestly
 
-- **Qt picks the palette up at launch**, not live — relaunch Qt apps after a
-  theme switch.
+Most GTK and Qt apps are **not live**. Chroma writes the CSS / settings the
+moment you switch themes; open windows often keep the previous paint until
+you restart them. Same class of limitation [Accord](https://github.com/vonsensey/accord)
+hit — probably not really fixable without killing windows mid-use, which we
+refuse to do.
+
+- **GTK apps** — many need a restart after a theme switch. The **file manager**
+  (Nautilus) is especially finicky: close it fully, and sometimes an extra
+  theme flip helps the next open pick up the new palette.
+- **Qt** — picks the palette up at launch, not live. Relaunch after a switch.
 - **Apps with their own skins** (OBS themes, Steam, some Electron) ignore
   platform GTK/Qt colours. Different problem.
 - **LibreOffice** themes chrome via GTK; some notebook/brand strips stay LO's
@@ -123,6 +131,9 @@ omarchy plugin remove io.github.alxwolfenstein97.chroma
   `flatpak override --user --filesystem=xdg-config/gtk-4.0:ro <app>`.
 - We recolor stock Adwaita / adw-gtk3 rather than shipping a full theme
   engine — keeps the bridge small and update-safe on Omarchy's stack.
+
+If you are not the type who flips themes every afternoon: pick something you
+like, reboot once, profit. Live sync is for people who enjoy the carousel.
 
 ## Check
 
