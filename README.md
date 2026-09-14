@@ -1,7 +1,9 @@
 # Chroma
 
-**Omarchy themes your terminal, editor, and shell. Chroma carries the same
-palette into GTK and Qt apps — including the ones that used to ignore you.**
+**Omarchy themes your terminal, editor, and shell. Chroma is the big
+one-sweep: it paints the GTK and Qt *pipelines* most desktop apps already
+use, so dozens of programs pick up the active theme without a Style picker
+or a per-app skin.**
 
 ![Chroma on Hackerman — Files, Document Viewer, and BleachBit wearing the theme](preview.png)
 
@@ -14,12 +16,32 @@ GTK3, GTK4 / libadwaita, and Qt (via Omarchy's stock `QT_QPA_PLATFORMTHEME=gtk3`
 with the active theme's real colours — background, foreground, accent,
 destructive / success / warning — light and dark alike.
 
-Inspired by [Accord](https://github.com/vonsensey/accord), which proved the
-GTK `@define-color` bridge on Omarchy. Chroma keeps that core idea, hooks it
-straight into `theme-set.d` for an instant apply, prefers `adw-gtk3` when
-installed so GTK3 actually consumes the palette, and optionally themes root
-GUIs (`sudo` / `pkexec` BleachBit) with a one-time symlink — without forcing
-`qt6ct` or fighting Omarchy's Qt defaults.
+No Style carousel. You are not picking between “GTK” and “Qt” like they were
+themes — you are feeding colour data into the two toolkits almost every
+non-Electron Linux GUI shares. One hook, every `colors.toml` Omarchy knows
+about (stock, user forks, third-party installs). That is the whole point.
+
+## Why this exists (and where it stops)
+
+I spent time on **Archinstall + Hyprland + [Noctalia](https://github.com/noctalia-dev/noctalia-shell) 4.x + Catppuccin** across a whole system. Their theming engine was (and probably still is) excellent — credit where it is due. Sitting in that setup while Omarchy 3.x still felt thin on theming, I got the itch to theme *everything*. Most of that Noctalia-era work was manual and locked to one palette anyway. When Hypr Lua configs got messy and I did not want to babysit them, I came back to Omarchy with a bit of restraint: extend what actually accepts colour data, leave the rest alone.
+
+Omarchy 4 baked agents, skills, and docs into the distro. DHH’s tagline moved toward *Beautiful, Fun & Agentic Linux* — and with that tooling in place, those Noctalia-era ideas got Omarchy-fied: itemised plugins that read the same 3.x `colors.toml` format, convert where needed, and work across **every** theme by design — not just one hand-tuned rice. Formats can grow later; the contract is “give us colour data (or something we can convert).”
+
+These plugins push [DHH](https://dhh.dk/) / Omarchy’s colour-coordinated desktop as far as it can **reasonably** go. Limitations are documented on purpose. If upstream never wants them as official defaults because of those trade-offs, that is fine — they stay optional. I change themes roughly every three weeks to every three months; for that cadence the restart quirks are cheap. Themes keep working without any of this. Authors can stick to the snappier stock pipeline. End users pick the extenders they want. The inch-a-lada is optional; making the system feel like *yours* is the point.
+
+Sibling Style plugins ([OmaOBS](https://github.com/AlxWolfenstein97/omaobs), [OmaCursor](https://github.com/AlxWolfenstein97/omacursor), [OmaBoot](https://github.com/AlxWolfenstein97/omaboot), [OmaVT](https://github.com/AlxWolfenstein97/omavt), [OmaTTY](https://github.com/AlxWolfenstein97/omatty)) target one surface each and often ship a picker so you can preview the same palette across every installed theme faster than flipping by hand. Chroma is different: it is the broad toolkit sweep, so silent `theme-set` sync is the right UX. None of these plugins require each other; together they cover a lot.
+
+Theme authors are free to mention these as extenders in their repos — or not. Grab whatever theme you like; the plugins still apply.
+
+### Why GTK & Qt (pipelines, not apps)
+
+Most “apps” on a Linux desktop are not custom paint engines. They speak **GTK** or **Qt**. Recolor those pipelines and you recolor Nautilus, Evince, BleachBit, File Roller, qBittorrent, qpwgraph, and a long tail of friends in one shot — without asking each upstream for a theme file.
+
+That is the opposite of shipping a skin for OBS (where a real theme format exists — see OmaOBS) or patching Chromium / Steam / a website. Those either have no stable colour contract, own their own UI chrome, or update on someone else’s schedule. Fighting that is a cat-and-mouse game with people who never asked for your patches; asking strangers to install your fork of Chromium or Steam is weirder still. Websites are worse: content CSS is not your desktop.
+
+**Hard stop:** if something cannot wear *any* installed Omarchy theme from `colors.toml` alone after a full restart — without binary forks, per-site CSS farms, or chasing remote content — Chroma (and this family of plugins) will not pretend it can. Leftovers that feel half-assed if forced: the open web, Steam Library / friends / settings, WhatsApp / Voice web UIs, LibreOffice document paper, mpv OSC, Goverlay chrome, one-off custom button skins. Unthemed beats fake.
+
+Inspired by [Accord](https://github.com/vonsensey/accord), which proved the GTK `@define-color` bridge on Omarchy. Chroma keeps that core idea, hooks it straight into `theme-set.d` for an instant apply, prefers `adw-gtk3` when installed so GTK3 actually consumes the palette, and optionally themes root GUIs (`sudo` / `pkexec` BleachBit) with a one-time symlink — without forcing `qt6ct` or fighting Omarchy's Qt defaults.
 
 ## What you get
 
@@ -95,6 +117,7 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
 - Force `QT_QPA_PLATFORMTHEME` away from Omarchy's `gtk3`.
 - Network. Ever.
 - Kill any app that owns a visible window.
+- Theme the open web, Steam chrome, or any app that ignores platform colours.
 
 ## Disable vs remove
 
@@ -123,7 +146,8 @@ refuse to do.
   theme flip helps the next open pick up the new palette.
 - **Qt** — picks the palette up at launch, not live. Relaunch after a switch.
 - **Apps with their own skins** (OBS themes, Steam, some Electron) ignore
-  platform GTK/Qt colours. Different problem.
+  platform GTK/Qt colours. Use a dedicated extender (OmaOBS, Omacord, …) or
+  leave them — do not expect Chroma to invent a contract that is not there.
 - **LibreOffice** themes chrome via GTK; some notebook/brand strips stay LO's
   own blue. Document background is a LO setting (“use printer metrics” /
   white-document prefs), not Chroma.
@@ -143,10 +167,19 @@ bash ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/check.sh
 
 ## Credits
 
-- [Accord](https://github.com/vonsensey/accord) by vonsensey — the clear
-  demonstration that Omarchy themes can drive libadwaita via user CSS, and
-  the craft bar for merge-safe managed blocks, luma-distance on-accent text,
-  and never-kill-a-window restarts.
+- [Noctalia](https://github.com/noctalia-dev/noctalia-shell) — the theming
+  engine that first made “theme the whole machine” feel reachable; these
+  Omarchy plugins grew out of that itch, then learned where to stop.
+- [Accord](https://github.com/vonsensey/accord) by vonsensey — proved Omarchy
+  themes can drive libadwaita via user CSS, and set the craft bar for
+  merge-safe managed blocks, luma-distance on-accent text, and
+  never-kill-a-window restarts.
+- Sibling extenders: [OmaOBS](https://github.com/AlxWolfenstein97/omaobs),
+  [OmaCursor](https://github.com/AlxWolfenstein97/omacursor),
+  [OmaBoot](https://github.com/AlxWolfenstein97/omaboot),
+  [OmaVT](https://github.com/AlxWolfenstein97/omavt),
+  [OmaTTY](https://github.com/AlxWolfenstein97/omatty); Discord:
+  [Omacord](https://github.com/ASwenia/omacord).
 - [OMCP](https://github.com/btsouth/omarchy-omcp) — MCP desktop bridge (themes,
   windows, screenshots, …). Helped build and iterate the preview here:
   `omarchy plugin add https://github.com/btsouth/omarchy-omcp --enable`
