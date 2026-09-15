@@ -5,11 +5,11 @@ one-sweep: it paints the GTK and Qt *pipelines* most desktop apps already
 use, so dozens of programs pick up the active theme without a Style picker
 or a per-app skin.**
 
-![Chroma on Hackerman — Files, Document Viewer, and BleachBit wearing the theme](preview.png)
+![Chroma on Asphalt Legends — Files, BleachBit, Document Viewer, and OBS wearing the theme](preview.png)
 
 Stock Omarchy flips Nautilus, BleachBit, Evince and friends between light and
 dark Adwaita. That is all they ever get: the same default grey in every theme.
-Your desktop wears Hackerman neon; your file manager wears beige.
+Your desktop wears Asphalt magenta; your file manager wears beige.
 
 Chroma closes that gap. Enable it once and every `omarchy theme set` paints
 GTK3, GTK4 / libadwaita, and Qt (via Omarchy's stock `QT_QPA_PLATFORMTHEME=gtk3`)
