@@ -33,7 +33,7 @@ The [plugin marketplace](https://plugins.omarchy.org/) feels a bit like a game w
 
 These plugins push [DHH](https://dhh.dk/) / Omarchy’s colour-coordinated desktop as far as it can **reasonably** go. Limitations are documented on purpose. If upstream never wants them as official defaults because of those trade-offs, that is fine — they stay optional. I change themes roughly every three weeks to every three months; for that cadence the restart quirks are cheap. Themes keep working without any of this. Authors can stick to the snappier stock pipeline. End users pick the extenders they want. The inch-a-lada is optional; making the system feel like *yours* is the point.
 
-Sibling Style plugins ([OmaOBS](https://github.com/AlxWolfenstein97/omaobs), [OmaCursor](https://github.com/AlxWolfenstein97/omacursor), [OmaBoot](https://github.com/AlxWolfenstein97/omaboot), [OmaVT](https://github.com/AlxWolfenstein97/omavt), [OmaTTY](https://github.com/AlxWolfenstein97/omatty)) target one surface each and often ship a picker so you can preview the same palette across every installed theme faster than flipping by hand. Chroma is different: it is the broad toolkit sweep, so silent `theme-set` sync is the right UX. None of these plugins require each other; together they cover a lot.
+Sibling Style plugins ([OmaOBS](https://github.com/AlxWolfenstein97/omaobs), [OmaCursor](https://github.com/AlxWolfenstein97/omacursor), [OmaBoot](https://github.com/AlxWolfenstein97/omaboot), [OmaVT](https://github.com/AlxWolfenstein97/omavt), [OmaTTY](https://github.com/AlxWolfenstein97/omatty)) target one surface each and ship a Style carousel so you can preview the same palette (or font) across every installed theme faster than flipping by hand. Those pickers draw PNG mockups with **Pillow** (`python-pillow`) — their installers pull that package *before* warming tiles. Chroma is different: it is the broad toolkit sweep, so silent `theme-set` sync is the right UX — **no carousel to warm**, and **no Pillow**. [OmaMenu](https://github.com/AlxWolfenstein97/omamenu) is the same story (shell/Quickshell only). None of these plugins require each other; together they cover a lot.
 
 Theme authors are free to mention these as extenders in their repos — or not. Grab whatever theme you like; the plugins still apply.
 
@@ -82,8 +82,15 @@ Theme root GUIs (BleachBit as root, etc.) — one password prompt:
 ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/install.sh --with-root
 ```
 
-**Package pulled when missing:** `adw-gtk-theme` (GTK3 needs it to honour
-libadwaita-style `@define-color`s). Nothing else.
+**Packages the installer pulls when missing:**
+
+| Package | Why |
+|---------|-----|
+| `adw-gtk-theme` | GTK3 only honours libadwaita-style `@define-color`s when the active theme is `adw-gtk3` / `adw-gtk3-dark`. Without it Chroma still writes CSS, but classic GTK3 chrome often stays beige. |
+
+Nothing else. No Pillow — Chroma has no Style carousel. The Style siblings
+(OmaCursor / OmaOBS / OmaBoot / OmaVT / OmaTTY) pull `python-pillow` for their
+mockups; that is a separate dep family.
 
 ## How it works
 

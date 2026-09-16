@@ -34,16 +34,19 @@ chmod 755 "$here/bin/chroma-apply" "$here/bin/chroma-sync-root" \
   "$here/bin/chroma-link-root" "$here/omarchy/theme-set-hook"
 
 # ------------------------------------------------------------------ packages
-# Only adw-gtk-theme — improves GTK3 against libadwaita CSS variables.
+# adw-gtk-theme: GTK3 apps only honour libadwaita-style @define-color variables
+# when the active gtk-theme is adw-gtk3 / adw-gtk3-dark. Without it, Chroma still
+# writes CSS, but classic GTK3 chrome often stays beige. Not Pillow — Chroma has
+# no Style carousel to warm (silent theme-set sync instead).
 # Deliberately NOT qt6ct: Omarchy defaults to QT_QPA_PLATFORMTHEME=gtk3 so Qt
 # inherits the GTK palette. Forcing qt6ct changed Quickshell icon lookup.
 if (( ! no_pkgs )); then
   if ! pacman -Q adw-gtk-theme &>/dev/null; then
     if command -v omarchy >/dev/null 2>&1; then
-      note "installing adw-gtk-theme"
+      note "installing adw-gtk-theme — GTK3 needs it to honour Chroma’s CSS variables"
       omarchy pkg add adw-gtk-theme || warn "could not install adw-gtk-theme"
     else
-      warn "omarchy not on PATH; install adw-gtk-theme manually"
+      warn "omarchy not on PATH; install adw-gtk-theme manually (GTK3 colour bridge)"
     fi
   fi
 fi
