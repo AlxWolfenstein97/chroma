@@ -91,12 +91,18 @@ else
 fi
 
 # ------------------------------------------------------------------- apply
+# Interactive install applies + hyprctl reload. Shell-service --quiet only does a
+# soft apply (no app restarts / no hypr reload) so boots stay calm; theme-set
+# hook covers later flips.
 if [[ -x $here/bin/chroma-apply ]]; then
-  "$here/bin/chroma-apply" || warn "initial apply failed — check theme colors.toml"
-fi
-
-if command -v hyprctl >/dev/null 2>&1; then
-  hyprctl reload >/dev/null 2>&1 || true
+  if (( quiet )); then
+    "$here/bin/chroma-apply" --no-restart --no-root >/dev/null 2>&1 || true
+  else
+    "$here/bin/chroma-apply" || warn "initial apply failed — check theme colors.toml"
+    if command -v hyprctl >/dev/null 2>&1; then
+      hyprctl reload >/dev/null 2>&1 || true
+    fi
+  fi
 fi
 
 note "done — Qt stays on Omarchy's gtk3 platform theme; GTK is fully chroma's"
