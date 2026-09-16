@@ -36,19 +36,60 @@ chmod 755 "$here/bin/chroma-apply" "$here/bin/chroma-sync-root" \
 # ------------------------------------------------------------------ packages
 # adw-gtk-theme: GTK3 apps only honour libadwaita-style @define-color variables
 # when the active gtk-theme is adw-gtk3 / adw-gtk3-dark. Without it, Chroma still
-# writes CSS, but classic GTK3 chrome often stays beige. Not Pillow — Chroma has
-# no Style carousel to warm (silent theme-set sync instead).
+# writes CSS, but classic GTK3 chrome often stays beige (Accord-like). Not Pillow —
+# Chroma has no Style carousel to warm (silent theme-set sync instead).
 # Deliberately NOT qt6ct: Omarchy defaults to QT_QPA_PLATFORMTHEME=gtk3 so Qt
 # inherits the GTK palette. Forcing qt6ct changed Quickshell icon lookup.
-if (( ! no_pkgs )); then
-  if ! pacman -Q adw-gtk-theme &>/dev/null; then
-    if command -v omarchy >/dev/null 2>&1; then
-      note "installing adw-gtk-theme — GTK3 needs it to honour Chroma’s CSS variables"
-      omarchy pkg add adw-gtk-theme || warn "could not install adw-gtk-theme"
-    else
-      warn "omarchy not on PATH; install adw-gtk-theme manually (GTK3 colour bridge)"
-    fi
+#
+# Packages need sudo. Interactive install can ask in this TTY; Service --quiet
+# cannot — open one floating terminal (once) so the password prompt is reachable.
+pull_pkgs() {
+  local -a missing=()
+  local pkg
+  for pkg in "$@"; do
+    pacman -Q "$pkg" &>/dev/null || missing+=("$pkg")
+  done
+  if ((${#missing[@]} == 0)); then
+    rm -f "$state/pkgs-prompted"
+    return 0
   fi
+
+  if ! command -v omarchy >/dev/null 2>&1; then
+    warn "install manually: pacman -S ${missing[*]}"
+    return 1
+  fi
+
+  note "installing ${missing[*]}"
+  if (( ! quiet )) && [[ -t 0 || -t 1 ]]; then
+    if omarchy pkg add "${missing[@]}"; then
+      rm -f "$state/pkgs-prompted"
+      return 0
+    fi
+    warn "could not install: ${missing[*]}"
+    return 1
+  fi
+
+  if [[ -f $state/pkgs-prompted ]]; then
+    warn "still missing ${missing[*]} — run: omarchy pkg add ${missing[*]}"
+    return 1
+  fi
+  mkdir -p "$state"
+  touch "$state/pkgs-prompted"
+  local cmd="omarchy pkg add ${missing[*]}"
+  [[ -n ${PULL_PKGS_AFTER:-} ]] && cmd+=" && ${PULL_PKGS_AFTER}"
+  if command -v omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1; then
+    warn "sudo needed for ${missing[*]} — opening a floating terminal"
+    omarchy-launch-floating-terminal-with-presentation "$cmd" >/dev/null 2>&1 &
+  else
+    warn "run: $cmd"
+  fi
+  return 1
+}
+
+if (( ! no_pkgs )); then
+  # After adw-gtk lands in the float, re-apply so gtk-theme flips to adw-gtk3*.
+  PULL_PKGS_AFTER="\"$here/bin/chroma-apply\" --no-restart --no-root" \
+    pull_pkgs adw-gtk-theme || true
 fi
 
 # --------------------------------------------------------------- theme hook
