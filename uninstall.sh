@@ -1,8 +1,10 @@
 #!/bin/bash
-# Remove Chroma wiring. Does not uninstall adw-gtk-theme / qt6ct packages.
+# Full clean-slate: revert GTK/Qt CSS + gsettings, remove theme-set hook,
+# hypr leftovers, root symlinks, state. Does not pacman -R adw-gtk-theme.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+plugin_id="io.github.alxwolfenstein97.chroma"
 
 note() { printf 'chroma: %s\n' "$1"; }
 warn() { printf 'chroma: %s\n' "$1" >&2; }
@@ -28,7 +30,7 @@ if [[ -f $hl ]] && grep -q 'hypr.chroma-envs' "$hl"; then
   note "removed chroma require from hyprland.lua"
 fi
 
-# Root symlinks (optional teardown — asks once)
+# Root symlinks (optional teardown)
 if [[ -f $HOME/.local/state/omarchy/chroma/root-linked ]]; then
   note "removing /root/.config chroma symlinks (password prompt)"
   if command -v pkexec >/dev/null 2>&1; then
@@ -52,8 +54,13 @@ fi
 
 rm -rf "$HOME/.local/state/omarchy/chroma"
 rm -rf "$HOME/.local/share/chroma"
+rm -rf "$HOME/.cache/omarchy/chroma"
 
-note "uninstalled wiring. Disable/remove the plugin with:"
-note "  omarchy plugin disable io.github.alxwolfenstein97.chroma"
-note "  omarchy plugin remove io.github.alxwolfenstein97.chroma"
+if command -v omarchy >/dev/null 2>&1; then
+  omarchy plugin disable "$plugin_id" >/dev/null 2>&1 || true
+fi
+
+note "done — no chroma hook/CSS blocks/root links left (adw-gtk-theme package kept)"
+note "plugin files remain at $here until you omit/remove the plugin"
+note "  omarchy plugin remove $plugin_id"
 exit 0
