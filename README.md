@@ -135,7 +135,7 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
 | Action | What happens |
 |---|---|
 | `omarchy plugin disable …` | Shell service stops. **Theme hook still runs** — apps stay chromed on every theme switch. |
-| `./uninstall.sh` then disable / remove | Hook gone, CSS blocks stripped, gsettings restored (or handed back to `omarchy-theme-set-gnome`), root symlinks removable. Clean off. |
+| `./uninstall.sh` then disable / remove | Hook gone, CSS blocks stripped, gsettings restored (or handed back to `omarchy-theme-set-gnome`), root symlinks removable, state/cache gone. Clean off. Does **not** `pacman -R adw-gtk-theme`. |
 | `omarchy pkg drop adw-gtk-theme` | Optional. Back to stock Adwaita binary themes; light/dark flip only. |
 
 ```sh
