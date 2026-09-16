@@ -138,10 +138,15 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
 | `./uninstall.sh` then disable / remove | Hook gone, CSS blocks stripped, gsettings restored (or handed back to `omarchy-theme-set-gnome`), root symlinks removable, state/cache gone. Clean off. Shared packages stay. |
 | `omarchy pkg drop adw-gtk-theme` | Optional. Back to stock Adwaita binary themes; light/dark flip only. Only if nothing else needs adw-gtk3. |
 
+**Full wipe** — copy-paste to remove plugin wiring *and* the shared package this
+installer may have pulled (skip the `pkg drop` line if something else still
+needs adw-gtk3):
+
 ```sh
 ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/uninstall.sh
 omarchy plugin disable io.github.alxwolfenstein97.chroma
 omarchy plugin remove io.github.alxwolfenstein97.chroma
+omarchy pkg drop adw-gtk-theme
 ```
 
 ## Limits, honestly
