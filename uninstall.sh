@@ -60,7 +60,8 @@ if command -v omarchy >/dev/null 2>&1; then
   omarchy plugin disable "$plugin_id" >/dev/null 2>&1 || true
 fi
 
-note "done — no chroma hook/CSS blocks/root links left (adw-gtk-theme package kept)"
+note "done — no chroma hook/CSS blocks/root links left"
+note "adw-gtk-theme package kept — optional: omarchy pkg drop adw-gtk-theme"
 note "plugin files remain at $here until you omit/remove the plugin"
 note "  omarchy plugin remove $plugin_id"
 exit 0
