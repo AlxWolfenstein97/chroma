@@ -29,6 +29,14 @@ hooks="$HOME/.config/omarchy/hooks/theme-set.d"
 hypr="$HOME/.config/hypr"
 state="$HOME/.local/state/omarchy/chroma"
 
+# Tombstone from uninstall: Service --quiet must not resurrect wiring.
+if [[ -f $state/uninstalled ]]; then
+  if (( quiet )); then
+    exit 0
+  fi
+  rm -f "$state/uninstalled"
+fi
+
 mkdir -p "$hooks" "$state"
 chmod 755 "$here/bin/chroma-apply" "$here/bin/chroma-sync-root" \
   "$here/bin/chroma-link-root" "$here/omarchy/theme-set-hook"
@@ -42,7 +50,7 @@ chmod 755 "$here/bin/chroma-apply" "$here/bin/chroma-sync-root" \
 # inherits the GTK palette. Forcing qt6ct changed Quickshell icon lookup.
 #
 # Packages need sudo. Interactive install can ask in this TTY; Service --quiet
-# cannot — open one floating terminal (once) so the password prompt is reachable.
+# must not open floating sudo — deps are interactive-only.
 pull_pkgs() {
   local -a missing=()
   local pkg
@@ -87,9 +95,14 @@ pull_pkgs() {
 }
 
 if (( ! no_pkgs )); then
-  # After adw-gtk lands in the float, re-apply so gtk-theme flips to adw-gtk3*.
-  PULL_PKGS_AFTER="\"$here/bin/chroma-apply\" --no-restart --no-root" \
-    pull_pkgs adw-gtk-theme || true
+  if (( quiet )); then
+    pacman -Q adw-gtk-theme &>/dev/null \
+      || warn "missing adw-gtk-theme — re-run install.sh interactively (or: omarchy pkg add adw-gtk-theme)"
+  else
+    # After adw-gtk lands, re-apply so gtk-theme flips to adw-gtk3*.
+    PULL_PKGS_AFTER="\"$here/bin/chroma-apply\" --no-restart --no-root" \
+      pull_pkgs adw-gtk-theme || true
+  fi
 fi
 
 # --------------------------------------------------------------- theme hook

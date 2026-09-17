@@ -88,9 +88,9 @@ Theme root GUIs (BleachBit as root, etc.) — one password prompt:
 |---------|-----|
 | `adw-gtk-theme` | GTK3 only honours libadwaita-style `@define-color`s when the active theme is `adw-gtk3` / `adw-gtk3-dark`. Without it Chroma still writes CSS, but classic GTK3 chrome often stays beige (Accord-like). |
 
-`omarchy pkg add` needs sudo. An interactive `install.sh` asks in that TTY; the
-shell-service `--quiet` path has no password prompt, so it opens **one** floating
-terminal the first time packages are missing. If you dismissed it:  
+`omarchy pkg add` needs sudo. Interactive `install.sh` asks in that TTY.
+Shell-service `--quiet` no longer re-pulls `adw-gtk-theme` or opens floating
+sudo (deps are interactive-only). If the package is missing after a full wipe:
 `omarchy pkg add adw-gtk-theme` then `omarchy theme refresh` (or re-run
 `install.sh` without `--quiet`).
 
@@ -144,7 +144,7 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
 | Action | What happens |
 |--------|----------------|
 | `omarchy plugin disable …` | Shell service stops. **Theme hook still runs** — apps stay chromed on every theme switch. |
-| `./uninstall.sh` then disable / remove | Hook gone, CSS blocks stripped, gsettings restored (or handed back to `omarchy-theme-set-gnome`), root symlinks removable, state/cache gone. Clean off. Shared packages stay. |
+| `./uninstall.sh` then disable / remove | Hook gone, CSS blocks stripped, gsettings restored (or handed back to `omarchy-theme-set-gnome`), root symlinks removable, state/cache gone. Clean off. Shared packages stay. Leaves a state tombstone so Service `--quiet` cannot resurrect wiring. |
 | `omarchy pkg drop adw-gtk-theme` | Optional. Back to stock Adwaita binary themes; light/dark flip only. Only if nothing else needs adw-gtk3. |
 
 **Full wipe** — copy-paste to remove plugin wiring *and* the shared package this

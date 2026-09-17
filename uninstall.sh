@@ -5,6 +5,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 plugin_id="io.github.alxwolfenstein97.chroma"
+state="$HOME/.local/state/omarchy/chroma"
 
 note() { printf 'chroma: %s\n' "$1"; }
 warn() { printf 'chroma: %s\n' "$1" >&2; }
@@ -31,7 +32,7 @@ if [[ -f $hl ]] && grep -q 'hypr.chroma-envs' "$hl"; then
 fi
 
 # Root symlinks (optional teardown)
-if [[ -f $HOME/.local/state/omarchy/chroma/root-linked ]]; then
+if [[ -f $state/root-linked ]]; then
   note "removing /root/.config chroma symlinks (password prompt)"
   if command -v pkexec >/dev/null 2>&1; then
     pkexec /bin/sh -c '
@@ -52,9 +53,12 @@ if [[ -f /etc/sudoers.d/chroma-sync-root ]]; then
   fi
 fi
 
-rm -rf "$HOME/.local/state/omarchy/chroma"
+rm -rf "$state"
 rm -rf "$HOME/.local/share/chroma"
 rm -rf "$HOME/.cache/omarchy/chroma"
+mkdir -p "$state"
+touch "$state/uninstalled"
+note "cleared state/cache (tombstone left so quiet install cannot resurrect)"
 
 if command -v omarchy >/dev/null 2>&1; then
   omarchy plugin disable "$plugin_id" >/dev/null 2>&1 || true
