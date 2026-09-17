@@ -49,8 +49,8 @@ chmod 755 "$here/bin/chroma-apply" "$here/bin/chroma-sync-root" \
 # Deliberately NOT qt6ct: Omarchy defaults to QT_QPA_PLATFORMTHEME=gtk3 so Qt
 # inherits the GTK palette. Forcing qt6ct changed Quickshell icon lookup.
 #
-# Packages need sudo. Interactive install can ask in this TTY; Service --quiet
-# must not open floating sudo — deps are interactive-only.
+# Packages need sudo. Interactive install asks in this TTY; Service --quiet
+# opens one floating terminal once (pkgs-prompted) — not again every boot.
 pull_pkgs() {
   local -a missing=()
   local pkg
@@ -95,14 +95,10 @@ pull_pkgs() {
 }
 
 if (( ! no_pkgs )); then
-  if (( quiet )); then
-    pacman -Q adw-gtk-theme &>/dev/null \
-      || warn "missing adw-gtk-theme — re-run install.sh interactively (or: omarchy pkg add adw-gtk-theme)"
-  else
-    # After adw-gtk lands, re-apply so gtk-theme flips to adw-gtk3*.
-    PULL_PKGS_AFTER="\"$here/bin/chroma-apply\" --no-restart --no-root" \
-      pull_pkgs adw-gtk-theme || true
-  fi
+  # Interactive: ask in this TTY. Quiet/Service: one floating terminal once
+  # (pkgs-prompted). After adw-gtk lands, re-apply so gtk-theme flips to adw-gtk3*.
+  PULL_PKGS_AFTER="\"$here/bin/chroma-apply\" --no-restart --no-root" \
+    pull_pkgs adw-gtk-theme || true
 fi
 
 # --------------------------------------------------------------- theme hook
