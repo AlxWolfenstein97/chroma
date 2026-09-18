@@ -28,14 +28,18 @@ warn() { printf 'chroma: %s\n' "$1" >&2; }
 hooks="$HOME/.config/omarchy/hooks/theme-set.d"
 hypr="$HOME/.config/hypr"
 state="$HOME/.local/state/omarchy/chroma"
+runtime_dir="${XDG_RUNTIME_DIR:-/tmp}/omarchy-chroma"
+pkgs_stamp="$runtime_dir/pkgs-prompted"
 
-# Tombstone from uninstall: Service --quiet must not resurrect wiring.
+# Tombstone from uninstall. Disable-first in uninstall.sh means a later quiet
+# Service run is a re-enable / re-add — clear tombstone + prompt stamps so the
+# Style menu and package floaters can run again (old quiet-exit left peeps stuck
+# with no floater after wipe).
 if [[ -f $state/uninstalled ]]; then
-  if (( quiet )); then
-    exit 0
-  fi
-  rm -f "$state/uninstalled"
+  rm -f "$state/uninstalled" "$pkgs_stamp" \
+    "$state/udev-prompted" "$state/udev-skipped" 2>/dev/null || true
 fi
+
 
 mkdir -p "$hooks" "$state"
 chmod 755 "$here/bin/chroma-apply" "$here/bin/chroma-sync-root" \
@@ -59,7 +63,7 @@ pull_pkgs() {
     pacman -Q "$pkg" &>/dev/null || missing+=("$pkg")
   done
   if ((${#missing[@]} == 0)); then
-    rm -f "$state/pkgs-prompted"
+    rm -f "$pkgs_stamp"
     return 0
   fi
 
@@ -84,19 +88,20 @@ pull_pkgs() {
     printf '%s\n' "────────────────────────────────"
     printf '%s\n' ""
     if omarchy pkg add "${missing[@]}"; then
-      rm -f "$state/pkgs-prompted"
+      rm -f "$pkgs_stamp"
       return 0
     fi
     warn "Chroma could not install: ${missing[*]}"
     return 1
   fi
 
-  if [[ -f $state/pkgs-prompted ]]; then
+  if [[ -f $pkgs_stamp ]]; then
     warn "Chroma still missing ${missing[*]} (GTK / libadwaita theme sync with Omarchy palettes) — run: omarchy pkg add ${missing[*]}"
     return 1
   fi
   mkdir -p "$state"
-  touch "$state/pkgs-prompted"
+  mkdir -p "$runtime_dir"
+  touch "$pkgs_stamp"
   local script="$state/install-floater.sh"
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -uo pipefail'
