@@ -53,15 +53,49 @@ chmod 755 "$here/bin/chroma-apply" "$here/bin/chroma-sync-root" \
 # Deliberately NOT qt6ct: Omarchy defaults to QT_QPA_PLATFORMTHEME=gtk3 so Qt
 # inherits the GTK palette. Forcing qt6ct changed Quickshell icon lookup.
 #
-# Packages need sudo. Interactive: header in this TTY. Service --quiet:
-# one headed floating terminal once (pkgs-prompted). Headers name this plugin,
-# what it does, and why each package is missing.
+# Packages need sudo. Shared python-pillow is claimed under a flock so parallel
+# quiet Services do not each open a Pillow floater. Scan pacman -Q first.
+# Floater: plugin header + missing pkgs only; closable via Done / default answers.
 pull_pkgs() {
   local -a missing=()
   local pkg
+  local style_rt="${XDG_RUNTIME_DIR:-/tmp}/omarchy-style-extenders"
+  local shared_ledger="$style_rt/shared-pkgs-claimed"
+  local claim_tmp
+  mkdir -p "$style_rt" "$runtime_dir" "$state"
+
   for pkg in "$@"; do
     pacman -Q "$pkg" &>/dev/null || missing+=("$pkg")
   done
+
+  if ((${#missing[@]})); then
+    claim_tmp=$(mktemp)
+    (
+      flock 8
+      local claimed="" line
+      [[ -f $shared_ledger ]] && claimed=$(cat "$shared_ledger" 2>/dev/null || true)
+      local -a still=()
+      for pkg in "${missing[@]}"; do
+        if [[ $pkg == python-pillow ]] && grep -qxF python-pillow <<<"$claimed"; then
+          continue
+        fi
+        still+=("$pkg")
+        if [[ $pkg == python-pillow ]]; then
+          printf '%s\n' python-pillow >>"$shared_ledger"
+        fi
+      done
+      printf '%s\n' "${still[@]}" >"$claim_tmp"
+    ) 8>"$style_rt/pkgs.lock"
+    mapfile -t missing <"$claim_tmp"
+    rm -f "$claim_tmp"
+    # drop empty line from mapfile
+    local -a cleaned=()
+    for pkg in "${missing[@]}"; do
+      [[ -n $pkg ]] && cleaned+=("$pkg")
+    done
+    missing=("${cleaned[@]}")
+  fi
+
   if ((${#missing[@]} == 0)); then
     rm -f "$pkgs_stamp"
     return 0
@@ -78,7 +112,7 @@ pull_pkgs() {
     printf '%s\n' "io.github.alxwolfenstein97.chroma"
     printf '%s\n' "GTK / libadwaita theme sync with Omarchy palettes"
     printf '%s\n' "────────────────────────────────"
-    printf '%s\n' "Needs to install (sudo / pacman):"
+    printf '%s\n' "Needs to install (sudo / pacman) — only packages missing on this system:"
     for pkg in "${missing[@]}"; do
       case $pkg in
         adw-gtk-theme) printf '  • %s — %s\n' "$pkg" 'GTK theme Chroma paints over' ;;
@@ -99,7 +133,6 @@ pull_pkgs() {
     warn "Chroma still missing ${missing[*]} (GTK / libadwaita theme sync with Omarchy palettes) — run: omarchy pkg add ${missing[*]}"
     return 1
   fi
-  mkdir -p "$state"
   mkdir -p "$runtime_dir"
   touch "$pkgs_stamp"
   local script="$state/install-floater.sh"
@@ -109,19 +142,17 @@ pull_pkgs() {
     printf '%s\n' "printf '%s\\n' 'io.github.alxwolfenstein97.chroma'"
     printf '%s\n' "printf '%s\\n' 'GTK / libadwaita theme sync with Omarchy palettes'"
     printf '%s\n' "printf '%s\\n' '────────────────────────────────'"
-    printf '%s\n' "printf '%s\\n' 'Needs to install (sudo / pacman):'"
+    printf '%s\n' "printf '%s\\n' 'Needs to install (sudo / pacman) — only packages missing on this system:'"
     for pkg in "${missing[@]}"; do
       case $pkg in
-        adw-gtk-theme) printf '%s\n' "printf '  • %s — %s\n' 'adw-gtk-theme' 'GTK theme Chroma paints over'" ;;
-        *) printf '%s\n' "printf '  • %s\n' $(printf %q "$pkg")" ;;
+        adw-gtk-theme) printf '%s\n' "printf '  • %s — %s\\n' 'adw-gtk-theme' 'GTK theme Chroma paints over'" ;;
+        *) printf '%s\n' "printf '  • %s\\n' $(printf %q "$pkg")" ;;
       esac
     done
     printf '%s\n' "printf '%s\\n' '────────────────────────────────'"
     printf '%s\n' "printf '%s\\n' ''"
     printf '%s\n' "omarchy pkg add ${missing[*]}"
-    if [[ -n ${PULL_PKGS_AFTER:-} ]]; then
-      printf '%s\n' "$PULL_PKGS_AFTER"
-    fi
+
   } >"$script"
   chmod 755 "$script"
   if command -v omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1; then
@@ -132,6 +163,7 @@ pull_pkgs() {
   fi
   return 1
 }
+
 
 
 

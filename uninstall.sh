@@ -71,15 +71,33 @@ launch_cleanup_floater() {
       printf '%s\n' "fi"
     fi
     if (( have_adw )); then
-      printf '%s\n' ''
-      printf '%s\n' "printf '%s\n' 'Optional — packages Chroma may have pulled (only if nothing else needs them):'"
-      printf '%s\n' "printf '  • %s — %s\n' 'adw-gtk-theme' 'was used as the GTK theme Chroma paints over'"
-      printf '%s\n' "printf '%s\n' '────────────────────────────────'"
-      printf '%s\n' "read -r -p 'Drop adw-gtk-theme? [y/N] ' a"
-      printf '%s\n' 'case $a in'
-      printf '%s\n' "  [yY]|[yY][eE][sS]) omarchy pkg drop adw-gtk-theme ;;"
-      printf '%s\n' "  *) printf 'skipped package drop\n' ;;"
-      printf '%s\n' 'esac'
+      printf '%s
+' ''
+      printf '%s
+' "printf '%s
+' 'Optional package drops — scanned; only if installed.'"
+      printf '%s
+' "printf '%s
+' 'Answer n / Enter to keep. Close with Done when finished.'"
+      printf '%s
+' "printf '%s
+' ''"
+      printf '%s
+' "printf '%s
+' 'adw-gtk-theme — GTK theme Chroma paints over'"
+      printf '%s
+' "read -r -p 'Drop adw-gtk-theme? [y/N] ' a"
+      printf '%s
+' 'case $a in'
+      printf '%s
+' "  [yY]|[yY][eE][sS]) omarchy pkg drop adw-gtk-theme && printf 'dropped adw-gtk-theme
+' || printf 'not dropped
+' ;;"
+      printf '%s
+' "  *) printf 'kept adw-gtk-theme
+' ;;"
+      printf '%s
+' 'esac'
     fi
   } >"$script"
   chmod 755 "$script"
