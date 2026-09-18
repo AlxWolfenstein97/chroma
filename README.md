@@ -143,13 +143,11 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
 
 ```sh
 omarchy plugin add https://github.com/AlxWolfenstein97/chroma.git --enable
-# Style → (no carousel — theme-set sweep) appears without a shell restart; carousel tiles warm (needs python-pillow)
-# Pick a loud theme; confirm the surface updates (GTK/Qt/icons follow Omarchy theme)
+# No Style carousel — theme-set hook sweeps GTK/Qt/icons on every Omarchy theme flip
+# Pick a loud theme; confirm apps follow (adw-gtk floater only if that package is missing)
 # Skip install floater → logout/reboot → floater returns (shell restart does not re-nag)
-# Parallel Style plugins share one Pillow floater; siblings only ask for their own missing pkgs
-# ./uninstall.sh → reset floater (headed floater: root symlink/sudoers teardown + optional adw-gtk drop) + optional itemized pkg drop (Pillow notes Required By)
+# ./uninstall.sh → headed floater: root symlink/sudoers teardown + optional adw-gtk drop
 # Skip remove floater + disable → reinstall → uninstall again → complete the floater
-# With mangohud/goverlay kept, Pillow drop may fail — fine; clear/uninstall still work without Pillow
 ```
 
 ## Disable vs remove
