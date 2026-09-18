@@ -139,6 +139,19 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
 - Kill any app that owns a visible window.
 - Theme the open web, Steam chrome, or any app that ignores platform colours.
 
+## Fresh VM smoke test
+
+```sh
+omarchy plugin add https://github.com/AlxWolfenstein97/chroma.git --enable
+# Style → (no carousel — theme-set sweep) appears without a shell restart; carousel tiles warm (needs python-pillow)
+# Pick a loud theme; confirm the surface updates (GTK/Qt/icons follow Omarchy theme)
+# Skip install floater → logout/reboot → floater returns (shell restart does not re-nag)
+# Parallel Style plugins share one Pillow floater; siblings only ask for their own missing pkgs
+# ./uninstall.sh → reset floater (headed floater: root symlink/sudoers teardown + optional adw-gtk drop) + optional itemized pkg drop (Pillow notes Required By)
+# Skip remove floater + disable → reinstall → uninstall again → complete the floater
+# With mangohud/goverlay kept, Pillow drop may fail — fine; clear/uninstall still work without Pillow
+```
+
 ## Disable vs remove
 
 | Action | What happens |
