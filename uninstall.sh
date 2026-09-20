@@ -140,5 +140,19 @@ rm -f "$state/root-linked"
 rm -f "$state/armed-theme-hook" "$state/armed-style-menu" 2>/dev/null || true
 
 note "done — no chroma hook/CSS blocks left; root/pkg cleanup in floating terminal when needed"
-note "plugin files remain at $here until you omit/remove the plugin"
-note "  omarchy plugin remove $plugin_id"
+if (( assume_yes )); then
+  note "full wipe (--yes): removing plugin $plugin_id"
+  if command -v omarchy >/dev/null 2>&1; then
+    # Leave the tree before Omarchy deletes it out from under us.
+    cd "${HOME:-/}" || cd /
+    omarchy plugin remove "$plugin_id" --yes \
+      || note "plugin remove failed — try: omarchy plugin remove $plugin_id --yes"
+  else
+    note "omarchy CLI missing — delete by hand: $here"
+  fi
+else
+  note "plugin files remain at $here until you omit/remove the plugin"
+  note "  omarchy plugin remove $plugin_id"
+fi
+
+exit 0

@@ -84,15 +84,18 @@ Theme-set helper: `./tools/install-theme-hook.sh --yes`.
 ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/arm-all-family.sh
 ```
 
-**Wipe the whole family in one shot** (teardown + `plugin remove --yes`;
-skips optional pkg Y/n — pillow etc. stay installed):
+**Full wipe (this plugin)** — same ease as `install.sh --yes`
+(teardown + `plugin remove`; skips optional pkg Y/n; pillow etc. stay):
+
+```sh
+~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/uninstall.sh --yes
+```
+
+**Wipe the whole family** (calls each plugin’s `uninstall.sh --yes`):
 
 ```sh
 ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/wipe-all-family.sh
 ```
-
-Single-plugin: `./uninstall.sh --yes` then
-`omarchy plugin remove io.github.alxwolfenstein97.chroma --yes`.
 
 Interactive `./install.sh` still asks [Y/n] if you prefer. Quiet shell restarts
 only restore what you already armed. `./uninstall.sh` clears the arm flags.
@@ -194,12 +197,10 @@ omarchy plugin add https://github.com/AlxWolfenstein97/chroma.git --enable
 | `./uninstall.sh` then disable / remove | Hook gone, CSS stripped, gsettings restored. Tombstone + disable **first**. Headed floating terminal for root symlink / sudoers teardown (sudo) + optional y/N `pkg drop adw-gtk-theme` — same clarity as Style extenders. |
 | `omarchy pkg drop adw-gtk-theme` | Optional. Back to stock Adwaita; only if nothing else needs adw-gtk3. Offered in the uninstall floater. |
 
-**Full wipe:**
+**Full wipe** — one shot (`--yes` skips pkg Y/n and removes the plugin):
 
 ```sh
-~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/uninstall.sh
-# floater: root teardown header + optional adw-gtk-theme drop
-omarchy plugin remove io.github.alxwolfenstein97.chroma
+~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/uninstall.sh --yes
 ```
 
 ## Limits, honestly
