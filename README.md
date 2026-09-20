@@ -63,6 +63,25 @@ Inspired by [Accord](https://github.com/vonsensey/accord), which proved the GTK 
 - **Light and dark** — `color-scheme` and `gtk-theme` stay mode-correct,
   preferring adw-gtk3 over stock Adwaita when available.
 
+
+## Marketplace consent (hooks & Style menu)
+
+Installing the plugin only drops the code into your plugins folder. Writing a
+**Style** menu row or a **theme-set** hook edits your Omarchy config, so that
+stays **opt-in** (marketplace rule: no silent config overwrite).
+
+Interactive `./install.sh` asks once (default Yes). Or run later:
+
+```sh
+./tools/install-theme-hook.sh   # arms theme-set + GTK apply
+```
+
+(theme-hook only (no Style carousel))
+
+Paths are under `~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/`.
+Quiet shell restarts only restore what you already armed. `./uninstall.sh`
+clears the arming flags too.
+
 ## Install
 
 ```sh

@@ -134,3 +134,5 @@ note "done — no chroma hook/CSS blocks left; root/pkg cleanup in floating term
 note "plugin files remain at $here until you omit/remove the plugin"
 note "  omarchy plugin remove $plugin_id"
 exit 0
+
+rm -f "$state/armed-theme-hook" "$state/armed-style-menu" 2>/dev/null || true

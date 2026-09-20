@@ -12,10 +12,15 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 quiet=0
+with_style_menu=0
+with_theme_hook=0
+arm_all=0
 with_root=0
 no_pkgs=0
 for arg in "$@"; do
   case $arg in
+    --with-theme-hook) with_theme_hook=1 ;;
+    --arm-all) arm_all=1 ;;
     --quiet) quiet=1 ;;
     --with-root|--with-sudoers) with_root=1 ;;
     --no-pkgs) no_pkgs=1 ;;
@@ -59,6 +64,27 @@ fi
 
 
 mkdir -p "$hooks" "$state"
+
+# --- marketplace consent: Style menu / theme-set hook are opt-in -----------
+# Quiet Service must not write user config unless previously armed.
+# Interactive asks; --with-style-menu / --with-theme-hook / --arm-all force.
+# Existing hook/menu from older installs grandfather into armed-*.
+arm_theme_hook=0
+arm_style_menu=0
+[[ -f $hooks/chroma ]] && arm_theme_hook=1
+(( with_theme_hook || arm_all )) && arm_theme_hook=1
+[[ -f $state/armed-theme-hook ]] && arm_theme_hook=1
+[[ -f $state/armed-style-menu ]] && arm_style_menu=1
+if (( ! quiet )); then
+  if (( ! arm_theme_hook )); then
+    printf '%s' "chroma: install theme-set auto-sync hook? [Y/n] "
+    read -r _ans || _ans=
+    case ${_ans:-Y} in [nN]|[nN][oO]) arm_theme_hook=0 ;; *) arm_theme_hook=1 ;; esac
+  fi
+fi
+if (( arm_theme_hook )); then touch "$state/armed-theme-hook"; else rm -f "$state/armed-theme-hook"; fi
+if (( arm_style_menu )); then touch "$state/armed-style-menu"; else rm -f "$state/armed-style-menu"; fi
+
 chmod 755 "$here/bin/chroma-apply" "$here/bin/chroma-sync-root" \
   "$here/bin/chroma-link-root" "$here/omarchy/theme-set-hook"
 
@@ -193,8 +219,13 @@ if (( ! no_pkgs )); then
 fi
 
 # --------------------------------------------------------------- theme hook
-install -m 755 "$here/omarchy/theme-set-hook" "$hooks/chroma"
-note "hook: $hooks/chroma"
+if (( arm_theme_hook )); then
+  install -m 755 "$here/omarchy/theme-set-hook" "$hooks/chroma"
+  note "hook: $hooks/chroma"
+else
+  rm -f "$hooks/chroma"
+  note "theme-set hook skipped — run: $here/tools/install-theme-hook.sh"
+fi
 
 # ---------------------------------------------- undo any prior qt6ct wiring
 rm -f "$hypr/chroma-envs.lua"
@@ -232,10 +263,8 @@ else
 fi
 
 # ------------------------------------------------------------------- apply
-# Interactive install applies + hyprctl reload. Shell-service --quiet only does a
-# soft apply (no app restarts / no hypr reload) so boots stay calm; theme-set
-# hook covers later flips.
-if [[ -x $here/bin/chroma-apply ]]; then
+# Only when the theme-set hook is armed (same consent as writing GTK CSS).
+if (( arm_theme_hook )) && [[ -x $here/bin/chroma-apply ]]; then
   if (( quiet )); then
     "$here/bin/chroma-apply" --no-restart --no-root >/dev/null 2>&1 || true
   else
@@ -244,6 +273,8 @@ if [[ -x $here/bin/chroma-apply ]]; then
       hyprctl reload >/dev/null 2>&1 || true
     fi
   fi
+elif (( ! arm_theme_hook )); then
+  note "GTK apply skipped until theme-set hook is armed"
 fi
 
 note "done — Qt stays on Omarchy's gtk3 platform theme; GTK is fully chroma's"
