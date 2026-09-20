@@ -84,6 +84,16 @@ Theme-set helper: `./tools/install-theme-hook.sh --yes`.
 ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/arm-all-family.sh
 ```
 
+**Wipe the whole family in one shot** (teardown + `plugin remove --yes`;
+skips optional pkg Y/n — pillow etc. stay installed):
+
+```sh
+~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/wipe-all-family.sh
+```
+
+Single-plugin: `./uninstall.sh --yes` then
+`omarchy plugin remove io.github.alxwolfenstein97.chroma --yes`.
+
 Interactive `./install.sh` still asks [Y/n] if you prefer. Quiet shell restarts
 only restore what you already armed. `./uninstall.sh` clears the arm flags.
 

@@ -4,6 +4,11 @@
 # + optional adw-gtk-theme drop. Does not pacman -R unless you say y.
 set -euo pipefail
 
+assume_yes=0
+for arg in "$@"; do
+  case $arg in --yes|-y) assume_yes=1 ;; esac
+done
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 plugin_id="io.github.alxwolfenstein97.chroma"
 state="$HOME/.local/state/omarchy/chroma"
@@ -44,7 +49,9 @@ need_root=0
 [[ -f /etc/sudoers.d/chroma-sync-root ]] && need_root=1
 
 have_adw=0
-pacman -Q adw-gtk-theme &>/dev/null && have_adw=1
+if (( ! assume_yes )); then
+  pacman -Q adw-gtk-theme &>/dev/null && have_adw=1
+fi
 
 launch_cleanup_floater() {
   (( need_root || have_adw )) || return 0
@@ -130,9 +137,8 @@ launch_cleanup_floater
 # Drop the hint after floater is launched (script already baked in).
 rm -f "$state/root-linked"
 
+rm -f "$state/armed-theme-hook" "$state/armed-style-menu" 2>/dev/null || true
+
 note "done — no chroma hook/CSS blocks left; root/pkg cleanup in floating terminal when needed"
 note "plugin files remain at $here until you omit/remove the plugin"
 note "  omarchy plugin remove $plugin_id"
-exit 0
-
-rm -f "$state/armed-theme-hook" "$state/armed-style-menu" 2>/dev/null || true
