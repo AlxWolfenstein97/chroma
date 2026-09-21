@@ -6,7 +6,21 @@ set -uo pipefail
 
 PLUGIN="${CHROMA_PLUGIN_DIR:-$HOME/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma}"
 APPLY="$PLUGIN/bin/chroma-apply"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/chroma"
+ERR="$STATE/last-hook-error"
 
-[[ -x $APPLY ]] || exit 0
-"$APPLY" >/dev/null 2>&1 || true
+mkdir -p "$STATE" 2>/dev/null || true
+rm -f "$ERR" 2>/dev/null || true
+
+[[ -f $APPLY ]] || exit 0
+
+# python3 avoids a lost +x bit silently skipping theming after plugin update.
+if command -v python3 >/dev/null 2>&1; then
+  out=$(python3 "$APPLY" --no-restart 2>&1) && exit 0
+else
+  [[ -x $APPLY ]] || exit 0
+  out=$("$APPLY" --no-restart 2>&1) && exit 0
+fi
+
+printf '%s\n' "$out" >"$ERR" 2>/dev/null || true
 exit 0

@@ -37,16 +37,41 @@ warn() { printf 'chroma: %s\n' "$1" >&2; }
 # Prefer sudo on a real TTY (arm-all / interactive install) so the password
 # lands in the same terminal. pkexec needs a working polkit agent — fine for
 # GUI menus, brittle in VMs / SSH / piped boom-in scripts.
+# Always `command sudo` / absolute path so aliases like `sudo='sudo -A'` never
+# steal the prompt in interactive wrappers.
 elevate() {
-  if { [[ -t 0 ]] || [[ -t 1 ]]; } && command -v sudo >/dev/null 2>&1; then
-    sudo "$@"
+  local sudo_bin=""
+  if command -v sudo >/dev/null 2>&1; then
+    sudo_bin=$(command -v sudo)
+  elif [[ -x /usr/bin/sudo ]]; then
+    sudo_bin=/usr/bin/sudo
+  fi
+  if { [[ -t 0 ]] || [[ -t 1 ]]; } && [[ -n $sudo_bin ]]; then
+    command "$sudo_bin" "$@"
   elif command -v pkexec >/dev/null 2>&1; then
     pkexec "$@"
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo "$@"
+  elif [[ -n $sudo_bin ]]; then
+    command "$sudo_bin" "$@"
   else
     return 127
   fi
+}
+
+# If a previous --with-root-before-apply left ~/.config/gtk-* owned by root,
+# reclaim them so chroma-apply can write CSS.
+repair_root_owned_gtk() {
+  local -a owned=()
+  local p
+  for p in "$HOME/.config/gtk-3.0" "$HOME/.config/gtk-4.0" \
+           "$HOME/.config/qt6ct" "$HOME/.config/qt5ct"; do
+    [[ -e $p ]] || continue
+    [[ -O $p ]] && continue
+    owned+=("$p")
+  done
+  ((${#owned[@]})) || return 0
+  warn "reclaiming root-owned GTK/Qt config dirs from a bad prior root-link: ${owned[*]}"
+  elevate chown -R "$USER:" "${owned[@]}" \
+    || warn "could not chown ${owned[*]} — apply may fail until fixed"
 }
 
 hooks="$HOME/.config/omarchy/hooks/theme-set.d"
@@ -105,7 +130,7 @@ if (( arm_theme_hook )); then touch "$state/armed-theme-hook"; else rm -f "$stat
 if (( arm_style_menu )); then touch "$state/armed-style-menu"; else rm -f "$state/armed-style-menu"; fi
 
 chmod 755 "$here/bin/chroma-apply" "$here/bin/chroma-sync-root" \
-  "$here/bin/chroma-link-root" "$here/omarchy/theme-set-hook"
+  "$here/bin/chroma-link-root" "$here/omarchy/theme-set-hook" 2>/dev/null || true
 
 # ------------------------------------------------------------------ packages
 # adw-gtk-theme: GTK3 apps only honour libadwaita-style @define-color variables
@@ -226,8 +251,54 @@ if [[ -f $hl ]] && grep -q 'hypr.chroma-envs' "$hl"; then
   note "removed leftover qt6ct hypr override"
 fi
 
+# Reclaim ~/.config/gtk-* if a prior root-link created them as root (fresh VM
+# boom-in used to link before apply — CSS writes then failed forever).
+repair_root_owned_gtk
+
+run_apply() {
+  local extra=()
+  (( $# )) && extra=("$@")
+  # Prefer python3 so a lost +x bit cannot silently skip theming.
+  if command -v python3 >/dev/null 2>&1; then
+    python3 "$here/bin/chroma-apply" "${extra[@]}"
+  elif [[ -x $here/bin/chroma-apply ]]; then
+    "$here/bin/chroma-apply" "${extra[@]}"
+  else
+    return 127
+  fi
+}
+
+# ------------------------------------------------------------------- apply
+# MUST run before --with-root so ~/.config/gtk-* exist as the user. Linking
+# first on a fresh machine mkdir'd those dirs as root and blocked all CSS.
+if (( arm_theme_hook )); then
+  if (( quiet )); then
+    run_apply --no-restart --no-root >/dev/null 2>&1 || true
+  else
+    if run_apply --no-restart; then
+      note "GTK palette applied"
+    else
+      warn "initial apply failed — check ~/.local/state/omarchy/current/theme/colors.toml"
+    fi
+    # Verify adw-gtk is actually selected when the package is present.
+    if pacman -Q adw-gtk-theme &>/dev/null && command -v gsettings >/dev/null 2>&1; then
+      _gtk=$(gsettings get org.gnome.desktop.interface gtk-theme 2>/dev/null || true)
+      case $_gtk in
+        *adw-gtk3*) ;;
+        *)
+          warn "gtk-theme is ${_gtk:-unknown} after apply (want adw-gtk3*) — retrying"
+          run_apply --no-restart || true
+          ;;
+      esac
+    fi
+  fi
+elif (( ! arm_theme_hook )); then
+  note "GTK apply skipped until theme-set hook is armed"
+fi
+
 # ---------------------------------------------------------------- root link
-# Optional — failure must not abort GTK arming (arm-all continues either way).
+# Optional — after apply so user GTK dirs already exist. Failure must not
+# abort GTK arming (arm-all continues either way).
 if (( with_root )); then
   if [[ -f $state/root-linked ]]; then
     note "root already linked ($state/root-linked)"
@@ -244,21 +315,6 @@ else
   if [[ ! -f $state/root-linked ]]; then
     note "root apps: run '$here/install.sh --with-root' once to theme sudo/pkexec BleachBit"
   fi
-fi
-
-# ------------------------------------------------------------------- apply
-# Only when the theme-set hook is armed (same consent as writing GTK CSS).
-if (( arm_theme_hook )) && [[ -x $here/bin/chroma-apply ]]; then
-  if (( quiet )); then
-    "$here/bin/chroma-apply" --no-restart --no-root >/dev/null 2>&1 || true
-  else
-    "$here/bin/chroma-apply" || warn "initial apply failed — check theme colors.toml"
-    if command -v hyprctl >/dev/null 2>&1; then
-      hyprctl reload >/dev/null 2>&1 || true
-    fi
-  fi
-elif (( ! arm_theme_hook )); then
-  note "GTK apply skipped until theme-set hook is armed"
 fi
 
 # Match siblings — keep the Service enabled after uninstall→re-arm / arm-all.

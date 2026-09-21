@@ -115,13 +115,14 @@ fi
 
 need_root=0
 [[ -f $state/root-linked ]] && need_root=1
+[[ -f $state/root-teardown-pending ]] && need_root=1
 [[ -f /etc/sudoers.d/chroma-sync-root ]] && need_root=1
 
 
 
 # Remember root flag before state wipe.
 root_linked=0
-[[ -f $state/root-linked ]] && root_linked=1
+[[ -f $state/root-linked || -f $state/root-teardown-pending ]] && root_linked=1
 need_root=$root_linked
 [[ -f /etc/sudoers.d/chroma-sync-root ]] && need_root=1
 
@@ -129,16 +130,31 @@ rm -rf "$HOME/.local/share/chroma"
 rm -rf "$HOME/.cache/omarchy/chroma"
 find "$state" -mindepth 1 ! -name uninstalled -delete 2>/dev/null || true
 touch "$state/uninstalled"
-# Keep root-linked hint until teardown finishes
+# Remember that root teardown is still needed. Prefer a user-writable flag —
+# older link-root left root-owned root-linked which made `touch` abort under
+# set -e and skipped teardown entirely.
 if (( root_linked )); then
-  touch "$state/root-linked"
+  if ! touch "$state/root-linked" 2>/dev/null; then
+    # Root-owned marker: drop a side flag and clear the bad marker in teardown.
+    touch "$state/root-teardown-pending" 2>/dev/null || true
+    need_root=1
+  fi
 fi
 note "cleared state/cache (tombstone left so quiet install cannot resurrect)"
 
 root_teardown() {
   (( need_root )) || return 0
   note "removing root chroma wiring (password once — sudo on TTY)"
-  root_cmd='for d in gtk-3.0 gtk-4.0 qt6ct qt5ct; do p=/root/.config/$d; [[ -L $p ]] && rm -f "$p"; done; rm -f /etc/sudoers.d/chroma-sync-root'
+  # Also chown-repair any user GTK dirs a bad prior link left as root, and
+  # remove a root-owned root-linked marker the user cannot delete.
+  root_cmd='for d in gtk-3.0 gtk-4.0 qt6ct qt5ct; do p=/root/.config/$d; [[ -L $p ]] && rm -f "$p"; done
+rm -f /etc/sudoers.d/chroma-sync-root
+marker='"$state"'/root-linked
+rm -f "$marker"
+for d in '"$HOME"'/.config/gtk-3.0 '"$HOME"'/.config/gtk-4.0 '"$HOME"'/.config/qt6ct '"$HOME"'/.config/qt5ct; do
+  [[ -e $d ]] || continue
+  chown -R '"$USER"': "$d" 2>/dev/null || true
+done'
   if elevate /bin/sh -c "$root_cmd"; then
     note "root chroma wiring removed"
   else
@@ -155,7 +171,7 @@ else
   ask_pkg_drop adw-gtk-theme
 fi
 
-rm -f "$state/root-linked"
+rm -f "$state/root-linked" "$state/root-teardown-pending" 2>/dev/null || true
 rm -f "$state/armed-theme-hook" "$state/armed-style-menu" 2>/dev/null || true
 
 note "done — no chroma hook/CSS blocks left"
