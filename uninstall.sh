@@ -147,14 +147,31 @@ if (( root_linked )); then
 fi
 note "cleared state/cache (tombstone left so quiet install cannot resurrect)"
 
-launch_cleanup_floater
+if (( assume_yes )); then
+  # inline root teardown (no floater) — boom boom
+  if (( need_root )); then
+    note "full wipe (--yes): removing root chroma wiring inline"
+    root_cmd='for d in gtk-3.0 gtk-4.0 qt6ct qt5ct; do p=/root/.config/$d; [[ -L $p ]] && rm -f "$p"; done; rm -f /etc/sudoers.d/chroma-sync-root'
+    if command -v pkexec >/dev/null 2>&1; then
+      pkexec /bin/sh -c "$root_cmd" && note "root chroma wiring removed"         || note "root teardown failed"
+    else
+      sudo bash -c "$root_cmd" && note "root chroma wiring removed"         || note "root teardown failed"
+    fi
+  fi
+else
+  launch_cleanup_floater
+fi
 
-# Drop the hint after floater is launched (script already baked in).
+# Drop the hint after floater is launched / inline teardown done.
 rm -f "$state/root-linked"
 
 rm -f "$state/armed-theme-hook" "$state/armed-style-menu" 2>/dev/null || true
 
-note "done — no chroma hook/CSS blocks left; root/pkg cleanup in floating terminal when needed"
+if (( assume_yes )); then
+  note "done — no chroma hook/CSS/root blocks left"
+else
+  note "done — no chroma hook/CSS blocks left; root/pkg cleanup in floating terminal when needed"
+fi
 if (( assume_yes )); then
   note "full wipe (--yes): trying package drops (kept if still required elsewhere)"
   try_pkg_drop adw-gtk-theme
