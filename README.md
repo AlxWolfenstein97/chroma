@@ -185,10 +185,10 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
 ```sh
 omarchy plugin add https://github.com/AlxWolfenstein97/chroma.git --enable
 # No Style carousel — theme-set hook sweeps GTK/Qt/icons on every Omarchy theme flip
-# Pick a loud theme; confirm apps follow (adw-gtk floater only if that package is missing)
-# Skip install floater → logout/reboot → floater returns (shell restart does not re-nag)
-# ./uninstall.sh → headed floater: root symlink/sudoers teardown + optional adw-gtk drop
-# Skip remove floater + disable → reinstall → uninstall again → complete the floater
+# Pick a loud theme; confirm apps follow (adw-gtk via install.sh / arm-all if missing)
+# plugin add alone + reboot → still no floater (quiet skips pkgs); run install.sh for deps/hooks
+# ./uninstall.sh → this TTY: root symlink/sudoers teardown + optional adw-gtk drop
+# Skip pkg prompts (n) + disable → reinstall → uninstall again → answer y if you want drops
 ```
 
 ## Disable vs remove
@@ -196,8 +196,8 @@ omarchy plugin add https://github.com/AlxWolfenstein97/chroma.git --enable
 | Action | What happens |
 |--------|----------------|
 | `omarchy plugin disable …` | Shell service stops. **Theme hook still runs** — apps stay chromed on every theme switch. |
-| `./uninstall.sh` then disable / remove | Hook gone, CSS stripped, gsettings restored. Tombstone + disable **first**. Headed floating terminal for root symlink / sudoers teardown (sudo) + optional y/N `pkg drop adw-gtk-theme` — same clarity as Style extenders. |
-| `omarchy pkg drop adw-gtk-theme` | Optional. Back to stock Adwaita; only if nothing else needs adw-gtk3. Offered in the uninstall floater. |
+| `./uninstall.sh` then disable / remove | Hook gone, CSS stripped, gsettings restored. Tombstone + disable **first**. This TTY: root symlink / sudoers teardown (sudo) + optional y/N `pkg drop adw-gtk-theme`. |
+| `omarchy pkg drop adw-gtk-theme` | Optional. Back to stock Adwaita; only if nothing else needs adw-gtk3. Offered as a TTY y/N on uninstall. |
 
 **Full wipe** — one shot (`--yes` skips pkg Y/n and removes the plugin):
 
