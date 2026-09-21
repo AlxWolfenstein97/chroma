@@ -171,6 +171,8 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
 **Optional ( `--with-root` )**
 
 - Symlinks `/root/.config/{gtk-3.0,gtk-4.0}` → your matching dirs.
+- On a TTY (arm-all / interactive / wipe), elevation uses `sudo` so the
+  password lands in the same terminal; `pkexec` is only the non-TTY fallback.
 
 **Does not**
 

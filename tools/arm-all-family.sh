@@ -5,11 +5,14 @@
 #   2. arm Style / theme-set (--yes)
 #   3. chroma --with-root, omacursor --with-sddm, omatty --with-drm-reapply
 #
+# Privileged steps use sudo on a TTY (may ask a few passwords). GTK / Style /
+# cursors still arm if a root/SDDM step is declined.
+#
 # `omarchy plugin add …` only clones + enables the shell service. That service
 # runs install.sh --quiet, which restores already-armed wiring and does NOT
 # open package floaters (marketplace consent). Boom-in = add plugins, then
 # this script once. Piece-meal still works: run each install.sh interactively
-# (TTY prompts / floaters) instead of arm-all.
+# (TTY prompts) instead of arm-all.
 #
 #   ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/arm-all-family.sh
 set -euo pipefail

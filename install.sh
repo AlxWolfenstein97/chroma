@@ -4,13 +4,15 @@
 #
 # Flags:
 #   --quiet       shell service: restore armed wiring; no pkg floaters
-#   --with-root   one-time: symlink /root/.config GTK/Qt dirs to yours (pkexec)
+#   --with-root   one-time: symlink /root/.config GTK/Qt dirs to yours
+#                 (sudo on a TTY — arm-all / interactive; pkexec otherwise)
 #   --with-sudoers  alias for --with-root (old name)
 #   --no-pkgs     skip package installs
 #
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+plugin_id="io.github.alxwolfenstein97.chroma"
 quiet=0
 with_style_menu=0
 with_theme_hook=0
@@ -31,6 +33,21 @@ done
 
 note() { (( quiet )) || printf 'chroma: %s\n' "$1"; }
 warn() { printf 'chroma: %s\n' "$1" >&2; }
+
+# Prefer sudo on a real TTY (arm-all / interactive install) so the password
+# lands in the same terminal. pkexec needs a working polkit agent — fine for
+# GUI menus, brittle in VMs / SSH / piped boom-in scripts.
+elevate() {
+  if { [[ -t 0 ]] || [[ -t 1 ]]; } && command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  elif command -v pkexec >/dev/null 2>&1; then
+    pkexec "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    return 127
+  fi
+}
 
 hooks="$HOME/.config/omarchy/hooks/theme-set.d"
 hypr="$HOME/.config/hypr"
@@ -167,18 +184,20 @@ pull_pkgs() {
   printf '%s\n' ""
   if omarchy pkg add "${missing[@]}"; then
     rm -f "$pkgs_stamp"
+    # Flip gtk-theme to adw-gtk3* as soon as the package lands (arm-all may
+    # have installed it already — then the later apply path covers it).
+    if [[ -n ${PULL_PKGS_AFTER:-} ]]; then
+      # shellcheck disable=SC2086
+      eval "$PULL_PKGS_AFTER" || true
+    fi
     return 0
   fi
   warn "Chroma could not install: ${missing[*]}"
   return 1
 }
 
-
-
-
 if (( ! no_pkgs )); then
-  # Interactive: ask in this TTY. Quiet/Service: one floating terminal once
-  # (pkgs-prompted). After adw-gtk lands, re-apply so gtk-theme flips to adw-gtk3*.
+  # After adw-gtk lands, re-apply so gtk-theme flips to adw-gtk3*.
   PULL_PKGS_AFTER="\"$here/bin/chroma-apply\" --no-restart --no-root" \
     pull_pkgs adw-gtk-theme || true
 fi
@@ -208,17 +227,17 @@ if [[ -f $hl ]] && grep -q 'hypr.chroma-envs' "$hl"; then
 fi
 
 # ---------------------------------------------------------------- root link
+# Optional — failure must not abort GTK arming (arm-all continues either way).
 if (( with_root )); then
   if [[ -f $state/root-linked ]]; then
     note "root already linked ($state/root-linked)"
   else
-    note "linking /root/.config GTK dirs to yours (password once)"
+    note "linking /root/.config GTK dirs to yours (password once — sudo on TTY)"
     link="$here/bin/chroma-link-root"
-    if command -v pkexec >/dev/null 2>&1; then
-      pkexec "$link" && note "root linked" \
-        || warn "root link failed — sudo bleachbit will stay unthemed until this succeeds"
+    if elevate "$link"; then
+      note "root linked"
     else
-      sudo "$link" && note "root linked" || warn "root link failed"
+      warn "root link failed — GTK theming still armed; re-run: $here/install.sh --with-root"
     fi
   fi
 else
@@ -240,6 +259,11 @@ if (( arm_theme_hook )) && [[ -x $here/bin/chroma-apply ]]; then
   fi
 elif (( ! arm_theme_hook )); then
   note "GTK apply skipped until theme-set hook is armed"
+fi
+
+# Match siblings — keep the Service enabled after uninstall→re-arm / arm-all.
+if command -v omarchy >/dev/null 2>&1; then
+  omarchy plugin enable "$plugin_id" >/dev/null 2>&1 || true
 fi
 
 note "done — Qt stays on Omarchy's gtk3 platform theme; GTK is fully chroma's"

@@ -16,6 +16,20 @@ state="$HOME/.local/state/omarchy/chroma"
 note() { printf 'chroma: %s\n' "$1"; }
 warn() { printf 'chroma: %s\n' "$1" >&2; }
 
+# Prefer sudo on a TTY (wipe-all / interactive) so the password lands in the
+# same terminal. pkexec is for GUI / non-TTY launches with a polkit agent.
+elevate() {
+  if { [[ -t 0 ]] || [[ -t 1 ]]; } && command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  elif command -v pkexec >/dev/null 2>&1; then
+    pkexec "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    return 127
+  fi
+}
+
 try_pkg_drop() {
   # Best-effort: drop packages we may have pulled. If something else still
   # needs them, pacman refuses and we leave them — that is fine.
@@ -123,12 +137,12 @@ note "cleared state/cache (tombstone left so quiet install cannot resurrect)"
 
 root_teardown() {
   (( need_root )) || return 0
-  note "removing root chroma wiring (may prompt for password)"
+  note "removing root chroma wiring (password once — sudo on TTY)"
   root_cmd='for d in gtk-3.0 gtk-4.0 qt6ct qt5ct; do p=/root/.config/$d; [[ -L $p ]] && rm -f "$p"; done; rm -f /etc/sudoers.d/chroma-sync-root'
-  if command -v pkexec >/dev/null 2>&1; then
-    pkexec /bin/sh -c "$root_cmd" && note "root chroma wiring removed" || note "root teardown failed"
+  if elevate /bin/sh -c "$root_cmd"; then
+    note "root chroma wiring removed"
   else
-    sudo bash -c "$root_cmd" && note "root chroma wiring removed" || note "root teardown failed"
+    note "root teardown failed — remove /root/.config/gtk-* symlinks by hand if needed"
   fi
 }
 
