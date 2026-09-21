@@ -85,22 +85,24 @@ Theme-set helper: `./tools/install-theme-hook.sh --yes`.
 ```
 
 **Full wipe (this plugin)** — same ease as `install.sh --yes`
-(teardown + `plugin remove`; best-effort `pkg drop` for deps this plugin may
-have pulled — kept only when pacman still needs them elsewhere):
+(full teardown + `plugin remove`; best-effort `pkg drop` for deps this plugin
+may have pulled — kept only when pacman still needs them elsewhere):
 
 ```sh
 ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/uninstall.sh --yes
 ```
 
-**Wipe the whole family** (each plugin’s `uninstall.sh --yes`, then a final
-shared-dep sweep — paint / hooks / menus / DRM / SDDM / root extras gone):
+**Wipe the whole family** (runs each plugin’s `uninstall.sh --yes` — same full
+teardown as a single-plugin wipe — then a final shared-dep sweep):
 
 ```sh
 ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/wipe-all-family.sh
 ```
 
 Interactive `./install.sh` still asks [Y/n] if you prefer. Quiet shell restarts
-only restore what you already armed. `./uninstall.sh` clears the arm flags.
+only restore what you already armed. `./uninstall.sh --yes` is a full wipe for
+that plugin (same teardown family wipe runs); without `--yes` you get TTY
+prompts for optional package drops.
 
 
 
@@ -130,9 +132,9 @@ omarchy plugin enable io.github.alxwolfenstein97.chroma
 | `adw-gtk-theme` | GTK3 only honours libadwaita-style `@define-color`s when the active theme is `adw-gtk3` / `adw-gtk3-dark`. Without it Chroma still writes CSS, but classic GTK3 chrome often stays beige (Accord-like). |
 
 `omarchy pkg add` needs sudo. Interactive `install.sh` asks in that TTY.
-Shell-service `--quiet` never re-pulls `adw-gtk-theme` or opens floating
-sudo — that path is for restoring armed wiring after login. Deps come from
-interactive `install.sh`, `install.sh --yes`, or family `arm-all-family.sh`.
+Shell-service `--quiet` never re-pulls `adw-gtk-theme` — that path only
+restores already-armed wiring after login. Deps come from interactive
+`install.sh`, `install.sh --yes`, or family `arm-all-family.sh`.
 If the package is missing after a wipe: `omarchy pkg add adw-gtk-theme` then
 `omarchy theme refresh` (or re-run `install.sh` without `--quiet`).
 
@@ -148,11 +150,10 @@ mockups; that is a separate dep family.
    managed blocks into `gtk-3.0` / `gtk-4.0` CSS + `settings.ini`, and sets
    GNOME `color-scheme` / `gtk-theme`.
 3. A small shell **service** runs `install.sh --quiet` once at shell start
-   (restores the theme-set hook if already armed; does **not** open package
-   floaters — deps are interactive / `arm-all` / `install.sh --yes`). It does
-   **not** probe-and-reapply on a timer —
-   the hook already covers switches, and a second path made boots/theme flips
-   feel heavier than they needed to.
+   (restores the theme-set hook if already armed; skips package installs —
+   deps are interactive / `arm-all` / `install.sh --yes`). It does **not**
+   probe-and-reapply on a timer — the hook already covers switches, and a
+   second path made boots/theme flips feel heavier than they needed to.
 4. Windowless GTK daemons (`--gapplication-service`) and
    `xdg-desktop-portal-gtk` are restarted only on interactive apply when they
    have no open window, so open apps are never killed mid-use.
@@ -175,8 +176,8 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
 - Symlinks `/root/.config/{gtk-3.0,gtk-4.0}` → your matching dirs.
 - On a TTY (arm-all / interactive / wipe), elevation uses `sudo` so the
   password lands in the same terminal; `pkexec` is only the non-TTY fallback.
-- Apply runs **before** the root link so a fresh machine never gets
-  root-owned `~/.config/gtk-*` (that used to block all CSS writes).
+- Apply runs **before** the root link so user GTK dirs exist before
+  `/root/.config` points at them.
 
 **Does not**
 
@@ -192,9 +193,9 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
 omarchy plugin add https://github.com/AlxWolfenstein97/chroma.git --enable
 # No Style carousel — theme-set hook sweeps GTK/Qt/icons on every Omarchy theme flip
 # Pick a loud theme; confirm apps follow (adw-gtk via install.sh / arm-all if missing)
-# plugin add alone + reboot → still no floater (quiet skips pkgs); run install.sh for deps/hooks
-# ./uninstall.sh → this TTY: root symlink/sudoers teardown + optional adw-gtk drop
-# Skip pkg prompts (n) + disable → reinstall → uninstall again → answer y if you want drops
+# plugin add alone + reboot → quiet restores wiring only; run install.sh / arm-all for deps/hooks
+# ./uninstall.sh --yes → full teardown (same as family wipe for this plugin)
+# Interactive ./uninstall.sh → TTY: root teardown + optional adw-gtk drop
 ```
 
 ## Disable vs remove

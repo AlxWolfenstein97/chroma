@@ -1,7 +1,7 @@
 #!/bin/bash
 # Full clean-slate: revert GTK/Qt CSS + gsettings, remove theme-set hook,
 # hypr leftovers, root symlinks, state. Root teardown + optional adw-gtk drop
-# in this TTY (or best-effort on --yes). No floaters.
+# in this TTY (or best-effort on --yes). Prompts stay in this TTY.
 set -euo pipefail
 
 assume_yes=0
@@ -45,7 +45,7 @@ try_pkg_drop() {
 }
 
 ask_pkg_drop() {
-  # Interactive — prompts in this terminal (no floater).
+  # Interactive — prompts in this terminal (this TTY).
   local -a have=()
   local pkg a req
   for pkg in "$@"; do
