@@ -98,10 +98,8 @@ chmod 755 "$here/bin/chroma-apply" "$here/bin/chroma-sync-root" \
 # Deliberately NOT qt6ct: Omarchy defaults to QT_QPA_PLATFORMTHEME=gtk3 so Qt
 # inherits the GTK palette. Forcing qt6ct changed Quickshell icon lookup.
 #
-# Packages need sudo. Shared python-pillow is claimed under a flock so parallel
-# quiet Services do not each open a Pillow floater. Claim is session-scoped;
-# same-session reinstall clears it with the uninstall tombstone (shell restart does not). Scan pacman -Q first.
-# Floater: plugin header + missing pkgs only; closable via Done / default answers.
+# Packages need sudo. Shared python-pillow claimed under a flock so parallel
+# install.sh runs do not each race a Pillow pull. Scan pacman -Q first.
 pull_pkgs() {
   local -a missing=()
   local pkg
@@ -153,61 +151,25 @@ pull_pkgs() {
   fi
 
   note "Chroma needs ${missing[*]} — GTK / libadwaita theme sync with Omarchy palettes"
-  # --yes / family oneshot: install inline (no floater). Interactive TTY same.
-  if (( assume_yes )) || { (( ! quiet )) && [[ -t 0 || -t 1 ]]; }; then
-    printf '%s\n' "Chroma"
-    printf '%s\n' "io.github.alxwolfenstein97.chroma"
-    printf '%s\n' "GTK / libadwaita theme sync with Omarchy palettes"
-    printf '%s\n' "────────────────────────────────"
-    printf '%s\n' "Needs to install (sudo / pacman) — only packages missing on this system:"
-    for pkg in "${missing[@]}"; do
-      case $pkg in
-        adw-gtk-theme) printf '  • %s — %s\n' "$pkg" 'GTK theme Chroma paints over' ;;
-        *) printf '  • %s\n' "$pkg" ;;
-      esac
-    done
-    printf '%s\n' "────────────────────────────────"
-    printf '%s\n' ""
-    if omarchy pkg add "${missing[@]}"; then
-      rm -f "$pkgs_stamp"
-      return 0
-    fi
-    warn "Chroma could not install: ${missing[*]}"
-    return 1
+  # Inline pkg add (interactive or --yes). No floaters.
+  printf '%s\n' "Chroma"
+  printf '%s\n' "io.github.alxwolfenstein97.chroma"
+  printf '%s\n' "GTK / libadwaita theme sync with Omarchy palettes"
+  printf '%s\n' "────────────────────────────────"
+  printf '%s\n' "Needs to install (sudo / pacman) — only packages missing on this system:"
+  for pkg in "${missing[@]}"; do
+    case $pkg in
+      adw-gtk-theme) printf '  • %s — %s\n' "$pkg" 'GTK theme Chroma paints over' ;;
+      *) printf '  • %s\n' "$pkg" ;;
+    esac
+  done
+  printf '%s\n' "────────────────────────────────"
+  printf '%s\n' ""
+  if omarchy pkg add "${missing[@]}"; then
+    rm -f "$pkgs_stamp"
+    return 0
   fi
-
-  if [[ -f $pkgs_stamp ]]; then
-    warn "Chroma still missing ${missing[*]} (GTK / libadwaita theme sync with Omarchy palettes) — run: omarchy pkg add ${missing[*]}"
-    return 1
-  fi
-  mkdir -p "$runtime_dir"
-  touch "$pkgs_stamp"
-  local script="$state/install-floater.sh"
-  {
-    printf '%s\n' '#!/usr/bin/env bash' 'set -uo pipefail'
-    printf '%s\n' "printf '%s\\n' 'Chroma'"
-    printf '%s\n' "printf '%s\\n' 'io.github.alxwolfenstein97.chroma'"
-    printf '%s\n' "printf '%s\\n' 'GTK / libadwaita theme sync with Omarchy palettes'"
-    printf '%s\n' "printf '%s\\n' '────────────────────────────────'"
-    printf '%s\n' "printf '%s\\n' 'Needs to install (sudo / pacman) — only packages missing on this system:'"
-    for pkg in "${missing[@]}"; do
-      case $pkg in
-        adw-gtk-theme) printf '%s\n' "printf '  • %s — %s\\n' 'adw-gtk-theme' 'GTK theme Chroma paints over'" ;;
-        *) printf '%s\n' "printf '  • %s\\n' $(printf %q "$pkg")" ;;
-      esac
-    done
-    printf '%s\n' "printf '%s\\n' '────────────────────────────────'"
-    printf '%s\n' "printf '%s\\n' ''"
-    printf '%s\n' "omarchy pkg add ${missing[*]}"
-
-  } >"$script"
-  chmod 755 "$script"
-  if command -v omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1; then
-    warn "Chroma missing ${missing[*]} (GTK / libadwaita theme sync with Omarchy palettes) — opening floating terminal"
-    omarchy-launch-floating-terminal-with-presentation "bash $(printf %q "$script")" >/dev/null 2>&1 &
-  else
-    warn "Chroma: run omarchy pkg add ${missing[*]}"
-  fi
+  warn "Chroma could not install: ${missing[*]}"
   return 1
 }
 

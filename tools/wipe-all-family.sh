@@ -7,8 +7,8 @@
 #   • omarchy plugin remove
 # Then a final shared-dep sweep (pillow / numpy / adw / terminus).
 #
-# Interactive per-plugin uninstall.sh (no --yes) uses this TTY for privileged
-# reset + optional pkg Y/n — no floaters. No TTY → re-run from a terminal or --yes.
+# Interactive per-plugin uninstall.sh (no --yes): privileged reset + optional
+# pkg Y/n in that terminal — no floaters.
 #
 #   ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/wipe-all-family.sh
 #
