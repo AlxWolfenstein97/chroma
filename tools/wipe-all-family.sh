@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # True one-shot OUT for the AlxWolfenstein97 Style/Chroma extender family.
 # Each uninstall.sh --yes:
-#   • tears down menus/hooks/state
-#   • resets privileged paint inline (Limine / VT / FONT / chroma root) — no floater Y/n
+#   • tears down menus/hooks/state + privileged paint (Limine / VT / FONT /
+#     chroma root / OmaTTY DRM udev / OmaCursor SDDM) — no floater Y/n
 #   • best-effort omarchy pkg drop for packages that plugin may have pulled
+#     (kept only when pacman still needs them elsewhere — lone-plugin boxes
+#     drop pillow / adw / terminus / numpy when nothing else owns them)
 #   • omarchy plugin remove
 # Then a final shared-dep sweep (pillow / numpy / adw / terminus).
 #
