@@ -3,7 +3,7 @@
 # Chroma installer. Safe to re-run: rewrites what it owns, leaves the rest alone.
 #
 # Flags:
-#   --quiet       less chatter (used by the shell service on startup)
+#   --quiet       shell service: restore armed wiring; no pkg floaters
 #   --with-root   one-time: symlink /root/.config GTK/Qt dirs to yours (pkexec)
 #   --with-sudoers  alias for --with-root (old name)
 #   --no-pkgs     skip package installs
@@ -23,7 +23,7 @@ for arg in "$@"; do
     --with-theme-hook) with_theme_hook=1 ;;
     --arm-all) arm_all=1 ;;
     --yes|-y) assume_yes=1; arm_all=1 ;;
-    --quiet) quiet=1 ;;
+    --quiet) quiet=1; no_pkgs=1 ;;  # Service: no pkg floaters; arm-all / interactive own deps
     --with-root|--with-sudoers) with_root=1 ;;
     --no-pkgs) no_pkgs=1 ;;
   esac

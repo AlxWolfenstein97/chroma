@@ -128,10 +128,11 @@ Theme root GUIs (BleachBit as root, etc.) — one password prompt:
 | `adw-gtk-theme` | GTK3 only honours libadwaita-style `@define-color`s when the active theme is `adw-gtk3` / `adw-gtk3-dark`. Without it Chroma still writes CSS, but classic GTK3 chrome often stays beige (Accord-like). |
 
 `omarchy pkg add` needs sudo. Interactive `install.sh` asks in that TTY.
-Shell-service `--quiet` no longer re-pulls `adw-gtk-theme` or opens floating
-sudo (deps are interactive-only). If the package is missing after a full wipe:
-`omarchy pkg add adw-gtk-theme` then `omarchy theme refresh` (or re-run
-`install.sh` without `--quiet`).
+Shell-service `--quiet` never re-pulls `adw-gtk-theme` or opens floating
+sudo — that path is for restoring armed wiring after login. Deps come from
+interactive `install.sh`, `install.sh --yes`, or family `arm-all-family.sh`.
+If the package is missing after a wipe: `omarchy pkg add adw-gtk-theme` then
+`omarchy theme refresh` (or re-run `install.sh` without `--quiet`).
 
 Nothing else. No Pillow — Chroma has no Style carousel. The Style siblings
 (OmaCursor / OmaOBS / OmaBoot / OmaVT / OmaTTY / OmaHud) pull `python-pillow` for their
@@ -144,9 +145,10 @@ mockups; that is a separate dep family.
 2. `bin/chroma-apply` reads the active theme's `colors.toml`, writes marked
    managed blocks into `gtk-3.0` / `gtk-4.0` CSS + `settings.ini`, and sets
    GNOME `color-scheme` / `gtk-theme`.
-3. A small shell **service** runs `install.sh` once at shell start (pulls
-   `adw-gtk-theme` if missing — via floating sudo when the service has no TTY —
-   restores the theme-set hook). It does **not** probe-and-reapply on a timer —
+3. A small shell **service** runs `install.sh --quiet` once at shell start
+   (restores the theme-set hook if already armed; does **not** open package
+   floaters — deps are interactive / `arm-all` / `install.sh --yes`). It does
+   **not** probe-and-reapply on a timer —
    the hook already covers switches, and a second path made boots/theme flips
    feel heavier than they needed to.
 4. Windowless GTK daemons (`--gapplication-service`) and
