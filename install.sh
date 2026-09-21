@@ -250,8 +250,7 @@ if [[ -f $hl ]] && grep -q 'hypr.chroma-envs' "$hl"; then
   note "removed leftover qt6ct hypr override"
 fi
 
-# Reclaim ~/.config/gtk-* if a prior root-link created them as root (fresh VM
-# boom-in used to link before apply — CSS writes then failed forever).
+# Reclaim ~/.config/gtk-* if a prior root-link left them owned by root.
 repair_root_owned_gtk
 
 run_apply() {
