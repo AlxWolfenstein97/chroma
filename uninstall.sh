@@ -1,7 +1,7 @@
 #!/bin/bash
 # Full clean-slate: revert GTK/Qt CSS + gsettings, remove theme-set hook,
 # hypr leftovers, root symlinks, state. Headed floater for privileged teardown
-# + optional adw-gtk-theme drop. Does not pacman -R unless you say y.
+# + optional adw-gtk-theme drop (interactive Y/n, or best-effort on --yes).
 set -euo pipefail
 
 assume_yes=0
@@ -15,6 +15,21 @@ state="$HOME/.local/state/omarchy/chroma"
 
 note() { printf 'chroma: %s\n' "$1"; }
 warn() { printf 'chroma: %s\n' "$1" >&2; }
+
+try_pkg_drop() {
+  # Best-effort: drop packages we may have pulled. If something else still
+  # needs them, pacman refuses and we leave them — that is fine.
+  local pkg
+  for pkg in "$@"; do
+    pacman -Q "$pkg" &>/dev/null || continue
+    if command -v omarchy >/dev/null 2>&1 && omarchy pkg drop "$pkg"; then
+      note "dropped $pkg"
+    else
+      note "kept $pkg (still required elsewhere or drop failed — fine)"
+    fi
+  done
+}
+
 
 # Tombstone + disable first so Service --quiet cannot resurrect wiring.
 mkdir -p "$state"
@@ -141,6 +156,8 @@ rm -f "$state/armed-theme-hook" "$state/armed-style-menu" 2>/dev/null || true
 
 note "done — no chroma hook/CSS blocks left; root/pkg cleanup in floating terminal when needed"
 if (( assume_yes )); then
+  note "full wipe (--yes): trying package drops (kept if still required elsewhere)"
+  try_pkg_drop adw-gtk-theme
   note "full wipe (--yes): removing plugin $plugin_id"
   if command -v omarchy >/dev/null 2>&1; then
     # Leave the tree before Omarchy deletes it out from under us.
