@@ -5,7 +5,7 @@
   "version": "1.2.0",
   "author": "AlxWolfenstein97",
   "license": "MIT",
-  "description": "Full GTK3/GTK4 and Qt (via Omarchy gtk3) theming hooked to the theme switcher, with optional root-app theming. Inspired by Accord.",
+  "description": "GTK/Qt theming hooked to theme switch. Not broken \u2014 read the git README to arm theme hooks after install.",
   "homepage": "https://github.com/AlxWolfenstein97/chroma",
   "repository": "https://github.com/AlxWolfenstein97/chroma",
   "kinds": [
