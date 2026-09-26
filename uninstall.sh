@@ -98,9 +98,29 @@ if [[ -x $here/bin/chroma-apply ]]; then
 fi
 
 rm -f "$HOME/.config/omarchy/hooks/theme-set.d/chroma"
-rm -f "$HOME/.config/hypr/chroma-envs.lua"
-rm -f "$HOME/.config/environment.d/99-chroma-qt.conf"
-rm -f "$HOME/.local/share/applications/qt6ct.desktop"
+# Only remove legacy Qt wiring we still recognise as Chroma-managed.
+remove_chroma_legacy() {
+  local f="$1" mode="$2"
+  [[ -f $f ]] || return 0
+  if grep -qiE 'chroma|QT_QPA_PLATFORMTHEME|qt6ct' "$f" 2>/dev/null; then
+    rm -f "$f"
+    return 0
+  fi
+  if [[ $mode == unique ]] && [[ ! -s $f ]]; then
+    rm -f "$f"
+    return 0
+  fi
+  note "keeping $f (content is not Chroma-managed)"
+}
+remove_chroma_legacy "$HOME/.config/hypr/chroma-envs.lua" unique
+remove_chroma_legacy "$HOME/.config/environment.d/99-chroma-qt.conf" unique
+if [[ -f $HOME/.local/share/applications/qt6ct.desktop ]]; then
+  if grep -qiE 'chroma|Managed by Chroma' "$HOME/.local/share/applications/qt6ct.desktop" 2>/dev/null; then
+    rm -f "$HOME/.local/share/applications/qt6ct.desktop"
+  else
+    note "keeping $HOME/.local/share/applications/qt6ct.desktop (not Chroma-managed)"
+  fi
+fi
 
 hl="$HOME/.config/hypr/hyprland.lua"
 if [[ -f $hl ]] && grep -q 'hypr.chroma-envs' "$hl"; then

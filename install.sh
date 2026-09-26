@@ -236,9 +236,31 @@ else
 fi
 
 # ---------------------------------------------- undo any prior qt6ct wiring
-rm -f "$hypr/chroma-envs.lua"
-rm -f "$HOME/.config/environment.d/99-chroma-qt.conf"
-rm -f "$HOME/.local/share/applications/qt6ct.desktop"
+# Only remove files whose content still looks Chroma-managed. Shared names
+# like qt6ct.desktop must never be deleted just for existing.
+remove_chroma_legacy() {
+  local f="$1" require_chroma_name="$2"
+  [[ -f $f ]] || return 0
+  if grep -qiE 'chroma|QT_QPA_PLATFORMTHEME|qt6ct' "$f" 2>/dev/null; then
+    rm -f "$f"
+    return 0
+  fi
+  if [[ $require_chroma_name == unique ]] && [[ ! -s $f ]]; then
+    rm -f "$f"
+    return 0
+  fi
+  note "keeping $f (content is not Chroma-managed)"
+}
+remove_chroma_legacy "$hypr/chroma-envs.lua" unique
+remove_chroma_legacy "$HOME/.config/environment.d/99-chroma-qt.conf" unique
+# qt6ct.desktop is a generic launcher name — require an explicit Chroma marker.
+if [[ -f $HOME/.local/share/applications/qt6ct.desktop ]]; then
+  if grep -qiE 'chroma|Managed by Chroma' "$HOME/.local/share/applications/qt6ct.desktop" 2>/dev/null; then
+    rm -f "$HOME/.local/share/applications/qt6ct.desktop"
+  else
+    note "keeping $HOME/.local/share/applications/qt6ct.desktop (not Chroma-managed)"
+  fi
+fi
 hl="$hypr/hyprland.lua"
 if [[ -f $hl ]] && grep -q 'hypr.chroma-envs' "$hl"; then
   tmp=$(mktemp)
