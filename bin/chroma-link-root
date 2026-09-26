@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import pwd
 import sys
+import time
 from pathlib import Path
 
 TARGETS = ("gtk-3.0", "gtk-4.0", "qt6ct", "qt5ct")
@@ -74,13 +75,18 @@ def main() -> int:
             continue
 
         if dest.exists() and not dest.is_symlink():
+            # Never rmtree root GTK/Qt dirs — a re-run can wipe configs written
+            # after the first link. Prefer a unique backup when the canonical
+            # .chroma-prelink slot is already taken.
             backup = dest.with_name(dest.name + ".chroma-prelink")
-            if not backup.exists():
-                dest.rename(backup)
-            else:
-                import shutil
-
-                shutil.rmtree(dest)
+            if backup.exists():
+                stamp = time.strftime("%Y%m%d%H%M%S")
+                backup = dest.with_name(f"{dest.name}.chroma-prelink.{stamp}")
+            dest.rename(backup)
+            print(
+                f"chroma-link-root: preserved {dest} → {backup}",
+                file=sys.stderr,
+            )
 
         if dest.is_symlink() or dest.exists():
             dest.unlink()
