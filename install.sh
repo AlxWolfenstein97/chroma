@@ -242,13 +242,13 @@ else
 fi
 
 # ---------------------------------------------- undo any prior qt6ct wiring
-# Only remove files with an explicit Chroma ownership marker in content.
-# Generic Qt terms (QT_QPA_PLATFORMTHEME / qt6ct) are not enough — a user may
-# have replaced these paths with ordinary Qt config that still mentions them.
+# Only remove files that carry the exact ownership marker "Managed by Chroma".
+# A bare "chroma" substring is not enough — a user-edited qt6ct.desktop (or
+# other shared path) may mention Chroma without being ours.
 remove_chroma_legacy() {
   local f="$1" mode="${2:-}"
   [[ -f $f ]] || return 0
-  if grep -qiE 'chroma|Managed by Chroma' "$f" 2>/dev/null; then
+  if grep -qF 'Managed by Chroma' "$f" 2>/dev/null; then
     rm -f "$f"
     return 0
   fi
@@ -257,7 +257,7 @@ remove_chroma_legacy() {
     rm -f "$f"
     return 0
   fi
-  note "keeping $f (no Chroma ownership marker)"
+  note "keeping $f (no Managed by Chroma ownership marker)"
 }
 remove_chroma_legacy "$hypr/chroma-envs.lua" unique
 remove_chroma_legacy "$HOME/.config/environment.d/99-chroma-qt.conf" unique

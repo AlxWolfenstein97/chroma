@@ -98,12 +98,12 @@ if [[ -x $here/bin/chroma-apply ]]; then
 fi
 
 rm -f "$HOME/.config/omarchy/hooks/theme-set.d/chroma"
-# Only remove legacy Qt wiring with an explicit Chroma ownership marker.
-# Generic QT_QPA_PLATFORMTHEME / qt6ct mentions are not ownership.
+# Only remove legacy Qt wiring with the exact "Managed by Chroma" marker.
+# Bare "chroma" substring is not ownership (shared qt6ct.desktop especially).
 remove_chroma_legacy() {
   local f="$1" mode="${2:-}"
   [[ -f $f ]] || return 0
-  if grep -qiE 'chroma|Managed by Chroma' "$f" 2>/dev/null; then
+  if grep -qF 'Managed by Chroma' "$f" 2>/dev/null; then
     rm -f "$f"
     return 0
   fi
@@ -111,7 +111,7 @@ remove_chroma_legacy() {
     rm -f "$f"
     return 0
   fi
-  note "keeping $f (no Chroma ownership marker)"
+  note "keeping $f (no Managed by Chroma ownership marker)"
 }
 remove_chroma_legacy "$HOME/.config/hypr/chroma-envs.lua" unique
 remove_chroma_legacy "$HOME/.config/environment.d/99-chroma-qt.conf" unique
