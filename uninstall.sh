@@ -98,11 +98,12 @@ if [[ -x $here/bin/chroma-apply ]]; then
 fi
 
 rm -f "$HOME/.config/omarchy/hooks/theme-set.d/chroma"
-# Only remove legacy Qt wiring we still recognise as Chroma-managed.
+# Only remove legacy Qt wiring with an explicit Chroma ownership marker.
+# Generic QT_QPA_PLATFORMTHEME / qt6ct mentions are not ownership.
 remove_chroma_legacy() {
-  local f="$1" mode="$2"
+  local f="$1" mode="${2:-}"
   [[ -f $f ]] || return 0
-  if grep -qiE 'chroma|QT_QPA_PLATFORMTHEME|qt6ct' "$f" 2>/dev/null; then
+  if grep -qiE 'chroma|Managed by Chroma' "$f" 2>/dev/null; then
     rm -f "$f"
     return 0
   fi
@@ -110,17 +111,11 @@ remove_chroma_legacy() {
     rm -f "$f"
     return 0
   fi
-  note "keeping $f (content is not Chroma-managed)"
+  note "keeping $f (no Chroma ownership marker)"
 }
 remove_chroma_legacy "$HOME/.config/hypr/chroma-envs.lua" unique
 remove_chroma_legacy "$HOME/.config/environment.d/99-chroma-qt.conf" unique
-if [[ -f $HOME/.local/share/applications/qt6ct.desktop ]]; then
-  if grep -qiE 'chroma|Managed by Chroma' "$HOME/.local/share/applications/qt6ct.desktop" 2>/dev/null; then
-    rm -f "$HOME/.local/share/applications/qt6ct.desktop"
-  else
-    note "keeping $HOME/.local/share/applications/qt6ct.desktop (not Chroma-managed)"
-  fi
-fi
+remove_chroma_legacy "$HOME/.local/share/applications/qt6ct.desktop"
 
 hl="$HOME/.config/hypr/hyprland.lua"
 if [[ -f $hl ]] && grep -q 'hypr.chroma-envs' "$hl"; then
@@ -140,11 +135,12 @@ need_root=0
 
 
 
-# Remember root flag before state wipe.
+# Remember root flag + package ledger before state wipe.
 root_linked=0
 [[ -f $state/root-linked || -f $state/root-teardown-pending ]] && root_linked=1
 need_root=$root_linked
 [[ -f /etc/sudoers.d/chroma-sync-root ]] && need_root=1
+mapfile -t pkgs_we_pulled < <(grep -v '^[[:space:]]*$' "$state/pkgs-installed" 2>/dev/null || true)
 
 rm -rf "$HOME/.local/share/chroma"
 rm -rf "$HOME/.cache/omarchy/chroma"
@@ -185,10 +181,19 @@ done'
 if (( assume_yes )); then
   note "full wipe (--yes): root teardown + package drops inline"
   root_teardown
-  try_pkg_drop adw-gtk-theme
+  if ((${#pkgs_we_pulled[@]})); then
+    note "dropping only packages this install recorded pulling"
+    try_pkg_drop "${pkgs_we_pulled[@]}"
+  else
+    note "no package ledger — skipping pkg drop (nothing this install recorded pulling)"
+  fi
 else
   root_teardown
-  ask_pkg_drop adw-gtk-theme
+  if ((${#pkgs_we_pulled[@]})); then
+    ask_pkg_drop "${pkgs_we_pulled[@]}"
+  else
+    note "no package ledger — skipping pkg drop (nothing this install recorded pulling)"
+  fi
 fi
 
 rm -f "$state/root-linked" "$state/root-teardown-pending" 2>/dev/null || true

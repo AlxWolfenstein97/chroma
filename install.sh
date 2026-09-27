@@ -207,6 +207,12 @@ pull_pkgs() {
   printf '%s\n' "────────────────────────────────"
   printf '%s\n' ""
   if omarchy pkg add "${missing[@]}"; then
+    mkdir -p "$state"
+    local pkg
+    for pkg in "${missing[@]}"; do
+      grep -qxF "$pkg" "$state/pkgs-installed" 2>/dev/null \
+        || printf '%s\n' "$pkg" >>"$state/pkgs-installed"
+    done
     rm -f "$pkgs_stamp"
     # Flip gtk-theme to adw-gtk3* as soon as the package lands (arm-all may
     # have installed it already — then the later apply path covers it).
@@ -236,31 +242,26 @@ else
 fi
 
 # ---------------------------------------------- undo any prior qt6ct wiring
-# Only remove files whose content still looks Chroma-managed. Shared names
-# like qt6ct.desktop must never be deleted just for existing.
+# Only remove files with an explicit Chroma ownership marker in content.
+# Generic Qt terms (QT_QPA_PLATFORMTHEME / qt6ct) are not enough — a user may
+# have replaced these paths with ordinary Qt config that still mentions them.
 remove_chroma_legacy() {
-  local f="$1" require_chroma_name="$2"
+  local f="$1" mode="${2:-}"
   [[ -f $f ]] || return 0
-  if grep -qiE 'chroma|QT_QPA_PLATFORMTHEME|qt6ct' "$f" 2>/dev/null; then
+  if grep -qiE 'chroma|Managed by Chroma' "$f" 2>/dev/null; then
     rm -f "$f"
     return 0
   fi
-  if [[ $require_chroma_name == unique ]] && [[ ! -s $f ]]; then
+  # Empty stub left under a Chroma-unique name — safe to drop.
+  if [[ $mode == unique ]] && [[ ! -s $f ]]; then
     rm -f "$f"
     return 0
   fi
-  note "keeping $f (content is not Chroma-managed)"
+  note "keeping $f (no Chroma ownership marker)"
 }
 remove_chroma_legacy "$hypr/chroma-envs.lua" unique
 remove_chroma_legacy "$HOME/.config/environment.d/99-chroma-qt.conf" unique
-# qt6ct.desktop is a generic launcher name — require an explicit Chroma marker.
-if [[ -f $HOME/.local/share/applications/qt6ct.desktop ]]; then
-  if grep -qiE 'chroma|Managed by Chroma' "$HOME/.local/share/applications/qt6ct.desktop" 2>/dev/null; then
-    rm -f "$HOME/.local/share/applications/qt6ct.desktop"
-  else
-    note "keeping $HOME/.local/share/applications/qt6ct.desktop (not Chroma-managed)"
-  fi
-fi
+remove_chroma_legacy "$HOME/.local/share/applications/qt6ct.desktop"
 hl="$hypr/hyprland.lua"
 if [[ -f $hl ]] && grep -q 'hypr.chroma-envs' "$hl"; then
   tmp=$(mktemp)
