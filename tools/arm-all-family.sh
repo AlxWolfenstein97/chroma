@@ -68,6 +68,18 @@ if ((${#missing[@]})); then
     printf 'arm-all-family: omarchy CLI missing — pacman -S %s\n' "${missing[*]}" >&2
     exit 1
   fi
+  # Attribute packages we just pulled to each plugin's ledger so uninstall
+  # --yes can drop them later (install.sh --yes would see them as already present).
+  for p in "${installed[@]}"; do
+    state="$HOME/.local/state/omarchy/$p"
+    mkdir -p "$state"
+    # shellcheck disable=SC2206
+    for pkg in ${pkgs_for[$p]}; do
+      printf '%s\n' "${missing[@]}" | grep -qxF "$pkg" || continue
+      grep -qxF "$pkg" "$state/pkgs-installed" 2>/dev/null \
+        || printf '%s\n' "$pkg" >>"$state/pkgs-installed"
+    done
+  done
 else
   printf 'arm-all-family: deps already present\n'
 fi

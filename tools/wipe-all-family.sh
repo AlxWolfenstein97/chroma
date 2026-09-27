@@ -3,17 +3,22 @@
 # Each uninstall.sh --yes is a full single-plugin wipe:
 #   • menus/hooks/state + privileged paint (Limine / VT / FONT / chroma root /
 #     OmaTTY DRM udev / OmaCursor SDDM)
-#   • best-effort pkg drop (kept only when pacman still needs them elsewhere)
+#   • best-effort pkg drop only for packages that install recorded pulling
 #   • omarchy plugin remove
-# Then a final shared-dep sweep (pillow / numpy / adw / terminus).
 #
-# Interactive per-plugin uninstall.sh (no --yes): same teardown + optional
-# pkg Y/n in that terminal.
+# No final shared-dep sweep — pre-existing pillow/numpy/adw/terminus stay unless
+# a plugin's ledger says it pulled them.
 #
 #   ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/wipe-all-family.sh
+#   ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/wipe-all-family.sh --purge-tombstones
 #
 # Single plugin: ~/.config/omarchy/plugins/io.github.alxwolfenstein97.<name>/uninstall.sh --yes
 set -euo pipefail
+
+purge_tombstones=0
+for arg in "$@"; do
+  case $arg in --purge-tombstones) purge_tombstones=1 ;; esac
+done
 
 base="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins"
 # Hint uninstall scripts to prefer inline privileged resets (belt + suspenders
@@ -36,15 +41,12 @@ for p in "${plugins[@]}"; do
   fi
 done
 
-printf 'wipe-all-family: final shared package sweep\n'
-for pkg in python-pillow python-numpy adw-gtk-theme terminus-font; do
-  pacman -Q "$pkg" &>/dev/null || continue
-  if command -v omarchy >/dev/null 2>&1 && omarchy pkg drop "$pkg"; then
-    printf 'wipe-all-family: dropped %s\n' "$pkg"
-  else
-    printf 'wipe-all-family: kept %s (still required elsewhere or drop failed — fine)\n' "$pkg"
-  fi
-done
+if (( purge_tombstones )); then
+  printf 'wipe-all-family: smashing tombstones (virgin state bookkeeping)\n'
+  for p in "${plugins[@]}"; do
+    rm -f "$HOME/.local/state/omarchy/$p/uninstalled"
+  done
+fi
 
 printf 'wipe-all-family: done\n'
 exit "$fail"

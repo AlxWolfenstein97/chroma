@@ -93,11 +93,34 @@ recorded pulling (pre-existing deps stay) — kept only when pacman still needs 
 ```
 
 **Wipe the whole family** (runs each plugin’s `uninstall.sh --yes` — same full
-teardown as a single-plugin wipe — then a final shared-dep sweep):
+teardown as a single-plugin wipe; ledger-only pkg drops, no blanket shared-dep sweep):
 
 ```sh
 ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/wipe-all-family.sh
+# optional virgin bookkeeping: add --purge-tombstones
 ```
+
+### Tombstones (after wipe)
+
+Each `uninstall.sh` leaves `~/.local/state/omarchy/<plugin>/uninstalled` so a
+**same-session** boom-out → boom-in can reset package-prompt stamps / shared
+Pillow claims and feel like a fresh install. Logout/reboot already clear those
+runtime stamps; long-term the file is harmless bookkeeping. Quiet Service does
+**not** re-arm Style from the tombstone — that needs a loud `install.sh` (or
+`--yes` / family arm).
+
+Smash tombstones only for virgin bookkeeping (never coming back / OCD clean):
+
+```sh
+rm -f ~/.local/state/omarchy/{chroma,omacursor,omaobs,omahud,omaboot,omavt,omatty}/uninstalled
+```
+
+Or fold that into the family wipe:
+
+```sh
+~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/wipe-all-family.sh --purge-tombstones
+```
+
 
 Interactive `./install.sh` still asks [Y/n] if you prefer. Quiet shell restarts
 only restore what you already armed. `./uninstall.sh --yes` is a full wipe for
@@ -203,8 +226,8 @@ omarchy plugin add https://github.com/AlxWolfenstein97/chroma.git --enable
 | Action | What happens |
 |--------|----------------|
 | `omarchy plugin disable …` | Shell service stops. **Theme hook still runs** — apps stay chromed on every theme switch. |
-| `./uninstall.sh` then disable / remove | Hook gone, CSS stripped, gsettings restored. Tombstone + disable **first**. This TTY: root symlink / sudoers teardown (sudo) + optional y/N `pkg drop adw-gtk-theme`. |
-| `omarchy pkg drop adw-gtk-theme` | Optional. Back to stock Adwaita; only if nothing else needs adw-gtk3. Offered as a TTY y/N on uninstall. |
+| `./uninstall.sh` then disable / remove | Hook gone, CSS stripped, gsettings restored. Tombstone + disable **first** (quiet will not re-arm without a loud install). This TTY: root symlink / sudoers teardown (sudo) + optional y/N `pkg drop` of packages this install recorded pulling (`adw-gtk-theme` when ledgered). |
+| `omarchy pkg drop adw-gtk-theme` | Optional — only if this install recorded pulling it. Back to stock Adwaita when dropped. |
 
 **Full wipe** — one shot (`--yes` skips pkg Y/n, best-effort drops packages this install recorded pulling (if nothing else needs them), and removes the plugin):
 
