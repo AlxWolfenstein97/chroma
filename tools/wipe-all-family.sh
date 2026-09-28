@@ -10,7 +10,7 @@
 # a plugin's ledger says it pulled them.
 #
 #   ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/wipe-all-family.sh
-#   ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/wipe-all-family.sh --purge-tombstones
+#   …/wipe-all-family.sh --purge-tombstones   # optional OCD: delete uninstalled notes
 #
 # Single plugin: ~/.config/omarchy/plugins/io.github.alxwolfenstein97.<name>/uninstall.sh --yes
 set -euo pipefail
@@ -42,7 +42,7 @@ for p in "${plugins[@]}"; do
 done
 
 if (( purge_tombstones )); then
-  printf 'wipe-all-family: smashing tombstones (virgin state bookkeeping)\n'
+  printf 'wipe-all-family: smashing tombstones (optional OCD)\n'
   for p in "${plugins[@]}"; do
     rm -f "$HOME/.local/state/omarchy/$p/uninstalled"
   done

@@ -99,25 +99,19 @@ drop may fail and stay if something else still requires the package):
 
 ```sh
 ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/wipe-all-family.sh
-# optional virgin bookkeeping: add --purge-tombstones
+# optional OCD: add --purge-tombstones (see Tombstones below)
 ```
 
 ### Tombstones (after wipe)
 
-Each `uninstall.sh` leaves `~/.local/state/omarchy/<plugin>/uninstalled` so a
-**same-session** boom-out → boom-in can reset package-prompt stamps / shared
-Pillow claims and feel like a fresh install. Logout/reboot already clear those
-runtime stamps; long-term the file is harmless bookkeeping. Quiet Service does
-**not** re-arm Style from the tombstone — that needs a loud `install.sh` (or
-`--yes` / family arm).
+Harmless sticky note at `~/.local/state/omarchy/<plugin>/uninstalled`. The next
+install (quiet or loud) uses it to clear same-session `/run` package-prompt
+stamps / shared Pillow claims, then deletes the note. Logout/reboot clears those
+stamps anyway. Style stays off after wipe because armed state is gone — not
+because of the stone. Normal boom-out → loud boom-in (arm-all) does **not** need
+`--purge-tombstones`.
 
-Smash tombstones only for virgin bookkeeping (never coming back / OCD clean):
-
-```sh
-rm -f ~/.local/state/omarchy/{chroma,omacursor,omaobs,omahud,omaboot,omavt,omatty}/uninstalled
-```
-
-Or fold that into the family wipe:
+Optional OCD wipe of the notes themselves:
 
 ```sh
 ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/wipe-all-family.sh --purge-tombstones
@@ -228,7 +222,7 @@ omarchy plugin add https://github.com/AlxWolfenstein97/chroma.git --enable
 | Action | What happens |
 |--------|----------------|
 | `omarchy plugin disable …` | Shell service stops. **Theme hook still runs** — apps stay chromed on every theme switch. |
-| `./uninstall.sh` then disable / remove | Hook gone, CSS stripped, gsettings restored. Tombstone + disable **first** (quiet will not re-arm without a loud install). This TTY: root symlink / sudoers teardown (sudo) + optional y/N `pkg drop` of packages this install recorded pulling (`adw-gtk-theme` when ledgered). |
+| `./uninstall.sh` then disable / remove | Hook gone, CSS stripped, gsettings restored. Quiet Service only restores what was already armed — after wipe that’s nothing until a loud install. This TTY: root symlink / sudoers teardown (sudo) + optional y/N `pkg drop` of packages this install recorded pulling (`adw-gtk-theme` when ledgered). |
 | `omarchy pkg drop adw-gtk-theme` | Optional — only if this install recorded pulling it; may fail/stay if something else still requires it. Back to stock Adwaita when dropped. |
 
 **Full wipe** — one shot (`--yes` skips pkg Y/n, ledger-only drops of packages this install recorded pulling (may fail and stay if something else still needs them — e.g. Goverlay after Pillow), and removes the plugin):
