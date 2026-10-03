@@ -244,8 +244,9 @@ refuse to do.
   theme flip helps the next open pick up the new palette.
 - **Qt** — picks the palette up at launch, not live. Relaunch after a switch.
 - **Apps with their own skins** (OBS themes, Steam, some Electron) ignore
-  platform GTK/Qt colours. Use a dedicated extender (OmaOBS, Omacord, …) or
-  leave them — do not expect Chroma to invent a contract that is not there.
+  platform GTK/Qt colours. Use a dedicated extender (OmaOBS, Omacord,
+  Omarchy Cava, …) or leave them — do not expect Chroma to invent a contract
+  that is not there.
 - **LibreOffice** themes chrome via GTK; some notebook/brand strips stay LO's
   own blue. Document background is a LO setting (“use printer metrics” /
   white-document prefs), not Chroma.
@@ -277,8 +278,18 @@ bash ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/check.sh
   [OmaBoot](https://github.com/AlxWolfenstein97/omaboot),
   [OmaVT](https://github.com/AlxWolfenstein97/omavt),
   [OmaTTY](https://github.com/AlxWolfenstein97/omatty),
-  [OmaHud](https://github.com/AlxWolfenstein97/omahud); Discord:
-  [Omacord](https://github.com/ASwenia/omacord).
+  [OmaHud](https://github.com/AlxWolfenstein97/omahud).
+- Already solved elsewhere (gladly):
+  - **[Omacord](https://github.com/ASwenia/omacord)** — Vesktop / Vencord Discord
+    follows Omarchy themes live. No theme carousel / mockup picker: it **syncs**,
+    and that’s the right call. Chat mockups are content-shaped anyway — you
+    censor half the shot and still aren’t showing a true layout:  
+    `omarchy plugin add https://github.com/ASwenia/omacord --enable`
+  - **[Omarchy Cava](https://github.com/duncio/omarchy-cava)** — theme-aware audio
+    bars along the bottom of an empty workspace (hides when windows show up). Goes
+    well with your music when you're vibing — not much to show in a rice shot with
+    windows open, which is the point:  
+    `omarchy plugin add https://github.com/duncio/omarchy-cava --enable`
 - [OMCP](https://github.com/btsouth/omarchy-omcp) — MCP desktop bridge (themes,
   windows, screenshots, …). Helped build and iterate the preview here:
   `omarchy plugin add https://github.com/btsouth/omarchy-omcp --enable`
