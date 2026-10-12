@@ -63,7 +63,6 @@ Inspired by [Accord](https://github.com/vonsensey/accord), which proved the GTK 
 - **Light and dark** — `color-scheme` and `gtk-theme` stay mode-correct,
   preferring adw-gtk3 over stock Adwaita when available.
 
-
 ## Marketplace consent (hooks & Style menu)
 
 Installing the plugin only drops the code. Style menu rows and theme-set hooks
@@ -117,13 +116,10 @@ Optional OCD wipe of the notes themselves:
 ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/tools/wipe-all-family.sh --purge-tombstones
 ```
 
-
 Interactive `./install.sh` still asks [Y/n] if you prefer. Quiet shell restarts
 only restore what you already armed. `./uninstall.sh --yes` is a full wipe for
 that plugin (same teardown family wipe runs); without `--yes` you get TTY
 prompts for optional package drops.
-
-
 
 ## Install
 
@@ -244,8 +240,7 @@ refuse to do.
   theme flip helps the next open pick up the new palette.
 - **Qt** — picks the palette up at launch, not live. Relaunch after a switch.
 - **Apps with their own skins** (OBS themes, Steam, some Electron) ignore
-  platform GTK/Qt colours. Use a dedicated extender (OmaOBS, Omacord,
-  Omarchy Cava, …) or leave them — do not expect Chroma to invent a contract
+  platform GTK/Qt colours. Use a dedicated extender (OmaOBS, Omacord, …) or leave them — do not expect Chroma to invent a contract
   that is not there.
 - **LibreOffice** themes chrome via GTK; some notebook/brand strips stay LO's
   own blue. Document background is a LO setting (“use printer metrics” /
@@ -285,11 +280,6 @@ bash ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/check.sh
     and that’s the right call. Chat mockups are content-shaped anyway — you
     censor half the shot and still aren’t showing a true layout:  
     `omarchy plugin add https://github.com/ASwenia/omacord --enable`
-  - **[Omarchy Cava](https://github.com/duncio/omarchy-cava)** — theme-aware audio
-    bars along the bottom of an empty workspace (hides when windows show up). Goes
-    well with your music when you're vibing — not much to show in a rice shot with
-    windows open, which is the point:  
-    `omarchy plugin add https://github.com/duncio/omarchy-cava --enable`
 - [OMCP](https://github.com/btsouth/omarchy-omcp) — MCP desktop bridge (themes,
   windows, screenshots, …). Helped build and iterate the preview here:
   `omarchy plugin add https://github.com/btsouth/omarchy-omcp --enable`
