@@ -2,10 +2,10 @@
 # True one-shot IN for whatever of the AlxWolfenstein97 extender family is
 # already installed (you pick plugins yourself with `plugin add`):
 #   1. collect missing deps once → omarchy pkg add
-#   2. arm Style / theme-set (--yes)
+#   2. arm theme-set (--yes)
 #   3. chroma --with-root, omacursor --with-sddm, omatty --with-drm-reapply
 #
-# Privileged steps use sudo on a TTY (may ask a few passwords). GTK / Style /
+# Privileged steps use sudo on a TTY (may ask a few passwords). GTK / Appearance /
 # cursors still arm if a root/SDDM step is declined.
 #
 # `omarchy plugin add …` only clones + enables the shell service. That service

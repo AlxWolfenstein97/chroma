@@ -176,13 +176,18 @@ def build_palette(t):
         view_bg = t["dark_background"]
         headerbar_bg = t["darker_background"]
         surface_bg = t["lighter_background"]
-        sidebar_bg = t["dark_background"]
+        # Nautilus-style places panes sit one step above the file view.
+        # Lift the sidebar a touch toward white so it reads as a separate
+        # surface instead of merging into the content area.
+        sidebar_bg = mix(view_bg, "#ffffff", 0.055)
     else:
         window_bg = t["dark_background"]
         view_bg = t["background"]
         headerbar_bg = t["darker_background"]
         surface_bg = t["background"]
-        sidebar_bg = t["dark_background"]
+        # Light themes already sit near white; use a faint dark wash so the
+        # sidebar still separates from the file view.
+        sidebar_bg = mix(view_bg, "#000000", 0.045)
 
     fg = t["foreground"]
     on_accent, separation = on_color(t["accent"], [t["background"], t["foreground"]])

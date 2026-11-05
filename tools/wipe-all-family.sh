@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# True one-shot OUT for the AlxWolfenstein97 Style/Chroma extender family.
+# True one-shot OUT for the AlxWolfenstein97 Appearance/Chroma extender family.
 # Each uninstall.sh --yes is a full single-plugin wipe:
 #   • menus/hooks/state + privileged paint (Limine / VT / FONT / chroma root /
 #     OmaTTY DRM udev / OmaCursor SDDM)

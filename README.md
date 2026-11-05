@@ -2,7 +2,7 @@
 
 **Omarchy themes your terminal, editor, and shell. Chroma is the big
 one-sweep: it paints the GTK and Qt *pipelines* most desktop apps already
-use, so dozens of programs pick up the active theme without a Style picker
+use, so dozens of programs pick up the active theme without an Appearance picker
 or a per-app skin.**
 
 ![Chroma on Hackerman — Files, Document Viewer, and BleachBit wearing the theme](preview.png)
@@ -16,7 +16,7 @@ GTK3, GTK4 / libadwaita, and Qt (via Omarchy's stock `QT_QPA_PLATFORMTHEME=gtk3`
 with the active theme's real colours — background, foreground, accent,
 destructive / success / warning — light and dark alike.
 
-No Style carousel. You are not picking between “GTK” and “Qt” like they were
+No Appearance carousel. You are not picking between “GTK” and “Qt” like they were
 themes — you are feeding colour data into the two toolkits almost every
 non-Electron Linux GUI shares. One hook, every `colors.toml` Omarchy knows
 about (stock, user forks, third-party installs). That is the whole point.
@@ -33,7 +33,7 @@ The [plugin marketplace](https://plugins.omarchy.org/) feels a bit like a game w
 
 These plugins push [DHH](https://dhh.dk/) / Omarchy’s colour-coordinated desktop as far as it can **reasonably** go. Limitations are documented on purpose. If upstream never wants them as official defaults because of those trade-offs, that is fine — they stay optional. I change themes roughly every three weeks to every three months; for that cadence the restart quirks are cheap. Themes keep working without any of this. Authors can stick to the snappier stock pipeline. End users pick the extenders they want. The inch-a-lada is optional; making the system feel like *yours* is the point.
 
-Sibling Style plugins ([OmaOBS](https://github.com/AlxWolfenstein97/omaobs), [OmaCursor](https://github.com/AlxWolfenstein97/omacursor), [OmaBoot](https://github.com/AlxWolfenstein97/omaboot), [OmaVT](https://github.com/AlxWolfenstein97/omavt), [OmaTTY](https://github.com/AlxWolfenstein97/omatty), [OmaHud](https://github.com/AlxWolfenstein97/omahud)) target one surface each and ship a Style carousel so you can preview the same palette (or font / HUD tint) across every installed theme faster than flipping by hand. Those pickers draw PNG mockups with **Pillow** (`python-pillow`) — their installers pull that package *before* warming tiles. Chroma is different: it is the broad toolkit sweep, so silent `theme-set` sync is the right UX — **no carousel to warm**, and **no Pillow**. [OmaMenu](https://github.com/AlxWolfenstein97/omamenu) is the same story (shell/Quickshell only). None of these plugins require each other; together they cover a lot.
+Sibling Appearance plugins ([OmaOBS](https://github.com/AlxWolfenstein97/omaobs), [OmaCursor](https://github.com/AlxWolfenstein97/omacursor), [OmaBoot](https://github.com/AlxWolfenstein97/omaboot), [OmaVT](https://github.com/AlxWolfenstein97/omavt), [OmaTTY](https://github.com/AlxWolfenstein97/omatty), [OmaHud](https://github.com/AlxWolfenstein97/omahud)) target one surface each and ship an Appearance carousel so you can preview the same palette (or font / HUD tint) across every installed theme faster than flipping by hand. Those pickers draw PNG mockups with **Pillow** (`python-pillow`) — their installers pull that package *before* warming tiles. Chroma is different: it is the broad toolkit sweep, so silent `theme-set` sync is the right UX — **no carousel to warm**, and **no Pillow**. [OmaMenu](https://github.com/AlxWolfenstein97/omamenu) is the same story (shell/Quickshell only). None of these plugins require each other; together they cover a lot.
 
 Theme authors are free to mention these as extenders in their repos — or not. Grab whatever theme you like; the plugins still apply.
 
@@ -63,10 +63,10 @@ Inspired by [Accord](https://github.com/vonsensey/accord), which proved the GTK 
 - **Light and dark** — `color-scheme` and `gtk-theme` stay mode-correct,
   preferring adw-gtk3 over stock Adwaita when available.
 
-## Marketplace consent (hooks & Style menu)
+## Marketplace consent (theme-set hook)
 
-Installing the plugin only drops the code. Style menu rows and theme-set hooks
-edit your Omarchy config, so they stay **opt-in**.
+Installing the plugin only drops the code. The theme-set hook edits your
+Omarchy config, so it stays **opt-in**.
 
 **Fast path (no prompts)** — from your home folder:
 
@@ -106,7 +106,7 @@ drop may fail and stay if something else still requires the package):
 Harmless sticky note at `~/.local/state/omarchy/<plugin>/uninstalled`. The next
 install (quiet or loud) uses it to clear same-session `/run` package-prompt
 stamps / shared Pillow claims, then deletes the note. Logout/reboot clears those
-stamps anyway. Style stays off after wipe because armed state is gone — not
+stamps anyway. Theme-set sync stays off after wipe because armed state is gone — not
 because of the stone. Normal boom-out → loud boom-in (arm-all) does **not** need
 `--purge-tombstones`.
 
@@ -130,7 +130,7 @@ omarchy plugin add https://github.com/AlxWolfenstein97/chroma.git --enable
 ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/install.sh
 ```
 
-That clones into `~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma` and arms hooks / Style after you
+That clones into `~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma` and arms the theme-set hook after you
 confirm. Skip prompts: `~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/install.sh --yes --with-root`.
 
 Or from an existing checkout:
@@ -153,7 +153,7 @@ restores already-armed wiring after login. Deps come from interactive
 If the package is missing after a wipe: `omarchy pkg add adw-gtk-theme` then
 `omarchy theme refresh` (or re-run `install.sh` without `--quiet`).
 
-Nothing else. No Pillow — Chroma has no Style carousel. The Style siblings
+Nothing else. No Pillow — Chroma has no Appearance carousel. The Extender siblings
 (OmaCursor / OmaOBS / OmaBoot / OmaVT / OmaTTY / OmaHud) pull `python-pillow` for their
 mockups; that is a separate dep family.
 
@@ -206,7 +206,7 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
 
 ```sh
 omarchy plugin add https://github.com/AlxWolfenstein97/chroma.git --enable
-# No Style carousel — theme-set hook sweeps GTK/Qt/icons on every Omarchy theme flip
+# No Appearance carousel — theme-set hook sweeps GTK/Qt/icons on every Omarchy theme flip
 # Pick a loud theme; confirm apps follow (adw-gtk via install.sh / arm-all if missing)
 # plugin add alone + reboot → quiet restores wiring only; run install.sh / arm-all for deps/hooks
 # ./uninstall.sh --yes → full teardown (same as family wipe for this plugin)

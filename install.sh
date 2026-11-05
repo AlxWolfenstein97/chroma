@@ -82,7 +82,7 @@ pkgs_stamp="$runtime_dir/pkgs-prompted"
 
 # Tombstone from uninstall. Disable-first in uninstall.sh means a later quiet
 # Service run is a re-enable / re-add — clear tombstone + prompt stamps so the
-# Style menu and package prompts can run again after wipe.
+# Theme-set hook and package prompts can run again after wipe.
 if [[ -f $state/uninstalled ]]; then
   # Per-plugin prompt stamps + shared Pillow claim. Claim survives an ignored
   # claim and would block pillow-only plugins (OmaBoot/OmaVT/OmaOBS) on
@@ -108,7 +108,7 @@ fi
 
 mkdir -p "$hooks" "$state"
 
-# --- marketplace consent: Style menu / theme-set hook are opt-in -----------
+# --- marketplace consent: theme-set hook is opt-in -----------
 # Quiet Service must not write user config unless previously armed.
 # Interactive asks; --with-style-menu / --with-theme-hook / --arm-all force.
 # Existing hook/menu from older installs grandfather into armed-*.
@@ -135,7 +135,7 @@ chmod 755 "$here/bin/chroma-apply" "$here/bin/chroma-sync-root" \
 # adw-gtk-theme: GTK3 apps only honour libadwaita-style @define-color variables
 # when the active gtk-theme is adw-gtk3 / adw-gtk3-dark. Without it, Chroma still
 # writes CSS, but classic GTK3 chrome often stays beige (Accord-like). Not Pillow —
-# Chroma has no Style carousel to warm (silent theme-set sync instead).
+# Chroma has no Appearance carousel to warm (silent theme-set sync instead).
 # Deliberately NOT qt6ct: Omarchy defaults to QT_QPA_PLATFORMTHEME=gtk3 so Qt
 # inherits the GTK palette. Forcing qt6ct changed Quickshell icon lookup.
 #

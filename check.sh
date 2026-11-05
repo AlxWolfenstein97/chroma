@@ -54,6 +54,17 @@ fi
 
 grep -q 'accent_bg_color #ff3d9a' "$tmp/gtk4/gtk.css" && pass "gtk4 accent" || bad "gtk4 accent"
 grep -q 'theme_bg_color #0b0618' "$tmp/gtk3/gtk.css" && pass "gtk3 bg" || bad "gtk3 bg"
+
+# Sidebar/places panes must read as a distinct surface from the file view.
+hex_luma() { local h=${1#\#}; echo $(( (0x${h:0:2} * 299 + 0x${h:2:2} * 587 + 0x${h:4:2} * 114) / 1000 )); }
+view_hex=$(sed -n 's/^@define-color view_bg_color \(#[0-9a-f]*\);/\1/p' "$tmp/gtk4/gtk.css" | head -1)
+side_hex=$(sed -n 's/^@define-color sidebar_bg_color \(#[0-9a-f]*\);/\1/p' "$tmp/gtk4/gtk.css" | head -1)
+if [[ -n $view_hex && -n $side_hex && $view_hex != "$side_hex" ]] \
+  && (( $(hex_luma "$side_hex") > $(hex_luma "$view_hex") )); then
+  pass "sidebar brighter than view"
+else
+  bad "sidebar brighter than view (view=$view_hex sidebar=$side_hex)"
+fi
 grep -q 'chroma:managed' "$tmp/gtk4/settings.ini" && pass "gtk4 settings.ini" || bad "gtk4 settings.ini"
 [[ -f $tmp/state/state.json ]] && pass "state.json" || bad "state.json"
 [[ -f $tmp/stage/manifest.json ]] && pass "root stage manifest" || bad "root stage manifest"
