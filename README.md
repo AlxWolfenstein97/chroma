@@ -5,7 +5,7 @@ one-sweep: it paints the GTK and Qt *pipelines* most desktop apps already
 use, so dozens of programs pick up the active theme without an Appearance picker
 or a per-app skin.**
 
-![Chroma on Hackerman — Files, Document Viewer, and BleachBit wearing the theme](preview.png)
+![Chroma on Hackerman — Neovim, btop, ls, and Files wearing the theme](preview.png)
 
 Stock Omarchy flips Nautilus, BleachBit, Evince and friends between light and
 dark Adwaita. That is all they ever get: the same default gray in every theme.
