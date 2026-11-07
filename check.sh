@@ -190,6 +190,40 @@ shopt -u nullglob
 ((${#leftovers[@]} == 0)) && pass "revert removes wrappers" || bad "revert leaves wrappers: ${leftovers[*]}"
 [[ ! -e $tmp/stage ]] && pass "revert clears root stage" || bad "revert leaves root stage"
 
+# Success stays quiet, but the hook keeps the full run and surfaces the one
+# actionable libhandy line on stderr for `omarchy theme set` to show.
+hookplugin="$tmp/hookplugin"
+hookstate="$tmp/hookstate"
+mkdir -p "$hookplugin/bin"
+cat >"$hookplugin/bin/chroma-apply" <<'PY'
+print("chroma: Fixture (dark), relaunch Disks (libhandy pinned to Adwaita)")
+PY
+hook_err=$(CHROMA_PLUGIN_DIR="$hookplugin" XDG_STATE_HOME="$hookstate" \
+  bash "$here/omarchy/theme-set-hook" 2>&1 >/dev/null)
+[[ $hook_err == *"chroma: relaunch Disks (libhandy pinned to Adwaita)"* ]] \
+  && pass "hook surfaces libhandy hint on stderr" \
+  || bad "hook surfaces libhandy hint on stderr ($hook_err)"
+grep -q 'relaunch Disks' "$hookstate/omarchy/chroma/last-run" 2>/dev/null \
+  && pass "hook keeps full run in last-run" \
+  || bad "hook keeps full run in last-run"
+[[ ! -e $hookstate/omarchy/chroma/last-hook-error ]] \
+  && pass "hook leaves no error on success" \
+  || bad "hook writes last-hook-error on success"
+
+# Failures still land in last-hook-error and stay off stderr.
+failplugin="$tmp/failplugin"
+failstate="$tmp/failstate"
+mkdir -p "$failplugin/bin"
+printf 'import sys\nprint("chroma: fixture failed")\nsys.exit(1)\n' \
+  >"$failplugin/bin/chroma-apply"
+fail_err=$(CHROMA_PLUGIN_DIR="$failplugin" XDG_STATE_HOME="$failstate" \
+  bash "$here/omarchy/theme-set-hook" 2>&1 >/dev/null)
+[[ -z $fail_err ]] && pass "hook stays quiet on failure" \
+  || bad "hook prints on failure ($fail_err)"
+grep -q 'fixture failed' "$failstate/omarchy/chroma/last-hook-error" 2>/dev/null \
+  && pass "hook records failure in last-hook-error" \
+  || bad "hook records failure in last-hook-error"
+
 # Validate manifest against omarchy if available
 if command -v omarchy >/dev/null 2>&1; then
   if omarchy plugin validate "$here" >/dev/null 2>&1; then

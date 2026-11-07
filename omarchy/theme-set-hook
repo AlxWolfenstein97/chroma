@@ -8,6 +8,7 @@ PLUGIN="${CHROMA_PLUGIN_DIR:-$HOME/.config/omarchy/plugins/io.github.alxwolfenst
 APPLY="$PLUGIN/bin/chroma-apply"
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/chroma"
 ERR="$STATE/last-hook-error"
+RUN="$STATE/last-run"
 
 mkdir -p "$STATE" 2>/dev/null || true
 rm -f "$ERR" 2>/dev/null || true
@@ -16,11 +17,23 @@ rm -f "$ERR" 2>/dev/null || true
 
 # python3 avoids a lost +x bit silently skipping theming after plugin update.
 if command -v python3 >/dev/null 2>&1; then
-  out=$(python3 "$APPLY" --no-restart 2>&1) && exit 0
+  out=$(python3 "$APPLY" --no-restart 2>&1)
 else
   [[ -x $APPLY ]] || exit 0
-  out=$("$APPLY" --no-restart 2>&1) && exit 0
+  out=$("$APPLY" --no-restart 2>&1)
+fi
+status=$?
+
+printf '%s\n' "$out" >"$RUN" 2>/dev/null || true
+
+if ((status != 0)); then
+  printf '%s\n' "$out" >"$ERR" 2>/dev/null || true
+  exit 0
 fi
 
-printf '%s\n' "$out" >"$ERR" 2>/dev/null || true
+# A dark switch pins open libhandy windows to stock Adwaita. Surface the one
+# line the user can act on; the full run stays in last-run.
+if [[ $out == *"relaunch "* ]]; then
+  printf 'chroma: relaunch %s\n' "${out##*relaunch }" >&2
+fi
 exit 0

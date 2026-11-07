@@ -313,8 +313,9 @@ documented below; we never kill a window that is in use to force a repaint.
   for that process. Light switches write plain `Adwaita`, which libhandy resets
   instead of pinning, so those recover live. This is a libhandy + GTK3 behavior
   triggered by Omarchy's ordering, not by wrapper rotation. Chroma names the
-  affected windows in its output (`relaunch Disks (libhandy pinned to
-  Adwaita)`) so the one stuck window is not a mystery. The legacy
+  affected windows (`relaunch Disks (libhandy pinned to Adwaita)`), the
+  theme-set hook echoes that line, and the full run stays in
+  `~/.local/state/omarchy/chroma/last-run`. The legacy
   `--no-gtk-wrapper` mode does not avoid the pin, but it leaves Chroma's palette
   in `~/.config/gtk-3.0/gtk.css`, already loaded by the process, so the window
   keeps its previous palette instead of dropping to Adwaita — at the cost of
