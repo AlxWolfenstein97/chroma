@@ -48,16 +48,39 @@ export CHROMA_QT6_DIR="$tmp/qt6"
 export CHROMA_QT5_DIR="$tmp/qt5"
 export CHROMA_QT_ENV_FILE="$tmp/environment.d/99-chroma-qt.conf"
 
+# A window-manager snapshot plus a fake /proc lets the libhandy hint be tested
+# hermetically: only processes whose maps mention libhandy are reported.
+mkdir -p "$tmp/proc/9001" "$tmp/proc/9002"
+printf '/usr/lib/libhandy-1.so.0\n' >"$tmp/proc/9001/maps"
+printf '/usr/lib/libgtk-3.so.0\n' >"$tmp/proc/9002/maps"
+cat >"$tmp/clients.json" <<'EOF'
+[
+  {"pid": 9001, "class": "org.gnome.DiskUtility", "title": "Disks"},
+  {"pid": 9002, "class": "org.gnome.Nautilus", "title": "Files"}
+]
+EOF
+export CHROMA_PROC_ROOT="$tmp/proc"
+export CHROMA_WINDOWED_JSON="$tmp/clients.json"
+
 # A user-written environment.d override must survive apply/revert. Only files
 # carrying Chroma's ownership marker (or an empty Chroma-unique stub) are ours.
 mkdir -p "$tmp/environment.d"
 printf 'QT_QPA_PLATFORMTHEME=qt6ct\n' >"$CHROMA_QT_ENV_FILE"
 
-if "$here/bin/chroma-apply" --no-restart --no-root; then
+if out=$("$here/bin/chroma-apply" --no-restart --no-root); then
   pass "apply dark fixture"
 else
   bad "apply dark fixture"
 fi
+
+# A switch to dark pins open libhandy windows to stock Adwaita; name them so
+# the user knows what to relaunch. Non-libhandy windows must stay quiet.
+echo "$out" | grep -q 'relaunch Disks (libhandy pinned to Adwaita)' \
+  && pass "dark switch reports libhandy relaunch" \
+  || bad "dark switch reports libhandy relaunch ($out)"
+echo "$out" | grep -q 'Nautilus' \
+  && bad "non-libhandy window reported" \
+  || pass "non-libhandy window not reported"
 
 grep -q 'accent_bg_color #ff3d9a' "$tmp/gtk4/gtk.css" && pass "gtk4 accent" || bad "gtk4 accent"
 
@@ -133,6 +156,18 @@ out=$("$here/bin/chroma-apply" --no-restart --no-root --no-gtk-wrapper)
 grep -q 'chroma:managed' "$tmp/gtk3/gtk.css" 2>/dev/null && pass "legacy css escape hatch" || bad "legacy css escape hatch"
 grep -q "gtk-theme-name=$base" "$tmp/gtk3/settings.ini" \
   && pass "legacy css uses base theme" || bad "legacy css uses base theme ($base)"
+echo "$out" | grep -q 'relaunch ' \
+  && bad "legacy css mode reports libhandy relaunch" \
+  || pass "legacy css mode does not report libhandy relaunch"
+
+# A switch to a light theme makes libhandy reset its pin instead of setting it,
+# so those windows recover live and no relaunch hint is needed.
+sed -i 's/mode = "dark"/mode = "light"/' "$tmp/theme/colors.toml"
+out=$("$here/bin/chroma-apply" --no-restart --no-root)
+echo "$out" | grep -q 'relaunch ' \
+  && bad "light switch reports libhandy relaunch" \
+  || pass "light switch does not report libhandy relaunch"
+sed -i 's/mode = "light"/mode = "dark"/' "$tmp/theme/colors.toml"
 
 # Revert restores the base theme before deleting generated wrappers.
 # It must also respect environment.d ownership.

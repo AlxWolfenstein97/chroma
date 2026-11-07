@@ -20,7 +20,7 @@ GTK3 and Qt repaint **live**: Chroma writes a generated theme next to
 `adw-gtk3` and rotates between two copies on each palette change, so open
 windows follow without a relaunch. Two things still need a relaunch: GTK4 /
 libadwaita, which reads user CSS once per process, and libhandy-based GTK3
-apps such as GNOME Disks after a light → dark switch (see
+apps such as GNOME Disks after a switch to a dark theme (see
 [Limits](#limits-honestly)).
 
 No Appearance carousel. You are not picking between “GTK” and “Qt” like they were
@@ -63,8 +63,8 @@ Inspired by [Accord](https://github.com/vonsensey/accord), which proved the GTK 
   `~/.local/share/themes/<base>-chroma-{a,b}` copies `adw-gtk3` (or stock
   Adwaita when the package is missing) and appends Chroma's palette. Switching
   themes alternates names so GTK3 re-reads its CSS and repaints open windows.
-  libhandy apps (GNOME Disks) follow light switches but pin on light → dark;
-  see [Limits](#limits-honestly).
+  libhandy apps (GNOME Disks) follow light switches but pin on any switch to
+  dark; see [Limits](#limits-honestly).
 - **Qt 5 / Qt 6 — live** — stays on Omarchy's `QT_QPA_PLATFORMTHEME=gtk3`, so
   Qt inherits the GTK3 palette Chroma just wrote. Qt's gtk3 platform theme
   re-reads the palette when the theme name changes. No qt6ct, no Kvantum, no
@@ -303,16 +303,23 @@ documented below; we never kill a window that is in use to force a repaint.
 - **GTK4 / libadwaita** — reads `~/.config/gtk-4.0/gtk.css` once per process.
   Nautilus, Evince, Calendar, Text Editor, Loupe and friends need a restart
   after a switch. This is the one remaining restart-only toolkit.
-- **GTK3 apps built on libhandy** — GNOME Disks is the common one. Light
-  switches keep following live, but a **light → dark** switch pins the open
-  window to stock Adwaita until you relaunch it. `omarchy-theme-set-gnome`
-  writes `gtk-theme=Adwaita-dark` before user `theme-set` hooks run; libhandy's
+- **GTK3 apps built on libhandy** — GNOME Disks and Document Viewer are the
+  common ones. Light switches keep following live, but **any** switch to a dark
+  theme pins the open window to stock Adwaita until you relaunch it. This even
+  happens on dark → dark: `omarchy-theme-set-gnome` writes
+  `gtk-theme=Adwaita-dark` before user `theme-set` hooks run; libhandy's
   `HdyStyleManager` sees the `-dark` name, strips it, installs `Adwaita` as an
   *application* setting, and GTK3 then ignores every later session theme change
   for that process. Light switches write plain `Adwaita`, which libhandy resets
-  instead of pinning, so they keep working. This is a libhandy + GTK3 behavior
-  triggered by Omarchy's ordering, not wrapper rotation; the legacy user-CSS
-  mode hits the same trigger. Relaunch the app once after the switch.
+  instead of pinning, so those recover live. This is a libhandy + GTK3 behavior
+  triggered by Omarchy's ordering, not by wrapper rotation. Chroma names the
+  affected windows in its output (`relaunch Disks (libhandy pinned to
+  Adwaita)`) so the one stuck window is not a mystery. The legacy
+  `--no-gtk-wrapper` mode does not avoid the pin, but it leaves Chroma's palette
+  in `~/.config/gtk-3.0/gtk.css`, already loaded by the process, so the window
+  keeps its previous palette instead of dropping to Adwaita — at the cost of
+  losing live GTK3 and Qt updates for every app. That is why the wrapper stays
+  the default: relaunching one libhandy window beats restarting everything.
 - **GTK3** — live when `adw-gtk-theme` is installed. Without it the generated
   theme is built on stock Adwaita, whose CSS uses literal colors: Qt still
   recolors, but classic GTK3 chrome stays beige until you install

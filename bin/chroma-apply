@@ -67,6 +67,8 @@ STATE_DIR = _env_path("CHROMA_STATE_DIR", _state_default())
 DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share"))
 THEMES_DIR = _env_path("CHROMA_THEMES_DIR", DATA_HOME / "themes")
 ROOT_STAGE = _env_path("CHROMA_ROOT_STAGE", DATA_HOME / "chroma/root-sync")
+PROC_ROOT = _env_path("CHROMA_PROC_ROOT", Path("/proc"))
+WINDOWED_JSON = os.environ.get("CHROMA_WINDOWED_JSON")
 STATE_FILE = STATE_DIR / "state.json"
 NO_GSETTINGS = os.environ.get("CHROMA_NO_GSETTINGS") == "1"
 NO_ROOT = os.environ.get("CHROMA_NO_ROOT") == "1"
@@ -948,30 +950,69 @@ def usable_saved(saved) -> bool:
     return isinstance(saved, dict) and any(saved.values())
 
 
-def windowed_pids():
-    try:
-        out = subprocess.run(
-            ["hyprctl", "clients", "-j"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+def windowed_apps():
+    """Visible toplevel windows from Hyprland, or None when unavailable."""
+    if WINDOWED_JSON:
+        try:
+            raw = Path(WINDOWED_JSON).read_text(encoding="utf-8")
+        except OSError:
+            return None
+    else:
+        try:
+            out = subprocess.run(
+                ["hyprctl", "clients", "-j"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
         if out.returncode != 0:
             return None
-        return {
-            c["pid"]
-            for c in json.loads(out.stdout)
-            if isinstance(c, dict) and c.get("pid")
-        }
-    except (
-        OSError,
-        subprocess.TimeoutExpired,
-        json.JSONDecodeError,
-        TypeError,
-        AttributeError,
-        KeyError,
-    ):
+        raw = out.stdout
+    try:
+        clients = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
         return None
+    if not isinstance(clients, list):
+        return None
+    return [c for c in clients if isinstance(c, dict) and c.get("pid")]
+
+
+def windowed_pids():
+    clients = windowed_apps()
+    return None if clients is None else {c["pid"] for c in clients}
+
+
+# libhandy's HdyStyleManager strips "-dark" from the system theme name and
+# installs the remainder as an application-level gtk-theme-name. Omarchy writes
+# Adwaita-dark before theme-set.d hooks run, so any open libhandy window is
+# pinned to stock Adwaita after a switch to a dark theme. GTK3 then ignores
+# Chroma's wrapper for that process until the app is relaunched.
+LIBHANDY_LABELS = {
+    "org.gnome.DiskUtility": "Disks",
+    "org.gnome.Evince": "Document Viewer",
+}
+
+
+def libhandy_apps() -> list[str]:
+    names = set()
+    for client in windowed_apps() or []:
+        try:
+            maps = (PROC_ROOT / str(client.get("pid")) / "maps").read_text(
+                encoding="utf-8", errors="replace"
+            )
+        except OSError:
+            continue
+        if "libhandy-1.so" not in maps:
+            continue
+        label = str(client.get("class") or "").strip()
+        label = LIBHANDY_LABELS.get(label, label)
+        if not label:
+            label = str(client.get("title") or client.get("pid")).strip()
+        if label:
+            names.add(label)
+    return sorted(names)
 
 
 def running_pids(name: str) -> list[int]:
@@ -1365,6 +1406,9 @@ def main():
     if not args.no_restart and changed:
         restarted, pending = restart_apps(kill_portal=not wrapper_mode)
 
+    # A switch *to* dark is what triggers the libhandy pin, even dark -> dark.
+    libhandy = libhandy_apps() if wrapper_mode and p["mode"] == "dark" else []
+
     wrapper_path = (THEMES_DIR / wrapper_name) if wrapper_name else None
     staged = stage_root(
         {
@@ -1431,7 +1475,11 @@ def main():
         },
         "qt_platformtheme": qt_env,
         "gsettings": gsettings,
-        "restarts": {"restarted": restarted, "pending": pending},
+        "restarts": {
+            "restarted": restarted,
+            "pending": pending,
+            "libhandy": libhandy,
+        },
         "root": {"status": root_status, "staged": staged, "stage": str(ROOT_STAGE)},
     }
     save_state(state)
@@ -1455,6 +1503,10 @@ def main():
         bits.append("restarted " + ",".join(restarted))
     if pending:
         bits.append("pending " + ",".join(pending))
+    if libhandy:
+        bits.append(
+            "relaunch " + ", ".join(libhandy) + " (libhandy pinned to Adwaita)"
+        )
     print(", ".join(bits))
     return 0
 
