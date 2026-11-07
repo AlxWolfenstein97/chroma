@@ -18,8 +18,10 @@ destructive / success / warning — light and dark alike.
 
 GTK3 and Qt repaint **live**: Chroma writes a generated theme next to
 `adw-gtk3` and rotates between two copies on each palette change, so open
-windows follow without a relaunch. GTK4 / libadwaita is the exception — it
-reads user CSS once per process, so those apps still need a restart.
+windows follow without a relaunch. Two things still need a relaunch: GTK4 /
+libadwaita, which reads user CSS once per process, and libhandy-based GTK3
+apps such as GNOME Disks after a light → dark switch (see
+[Limits](#limits-honestly)).
 
 No Appearance carousel. You are not picking between “GTK” and “Qt” like they were
 themes — you are feeding color data into the two toolkits almost every
@@ -61,6 +63,8 @@ Inspired by [Accord](https://github.com/vonsensey/accord), which proved the GTK 
   `~/.local/share/themes/<base>-chroma-{a,b}` copies `adw-gtk3` (or stock
   Adwaita when the package is missing) and appends Chroma's palette. Switching
   themes alternates names so GTK3 re-reads its CSS and repaints open windows.
+  libhandy apps (GNOME Disks) follow light switches but pin on light → dark;
+  see [Limits](#limits-honestly).
 - **Qt 5 / Qt 6 — live** — stays on Omarchy's `QT_QPA_PLATFORMTHEME=gtk3`, so
   Qt inherits the GTK3 palette Chroma just wrote. Qt's gtk3 platform theme
   re-reads the palette when the theme name changes. No qt6ct, no Kvantum, no
@@ -93,7 +97,8 @@ Inspired by [Accord](https://github.com/vonsensey/accord), which proved the GTK 
 
 | Surface | On `omarchy theme set` | What makes it move |
 |---------|------------------------|--------------------|
-| GTK3 apps (user) | **live** | wrapper theme name flips a → b |
+| GTK3 apps (user, non-libhandy) | **live** | wrapper theme name flips a → b |
+| GTK3 + libhandy (GNOME Disks) | light: live; dark: restart | libhandy pins the theme to Adwaita when Omarchy writes `Adwaita-dark` |
 | Qt 5 / Qt 6 apps (user) | **live** | gtk3 platform theme re-reads named colors |
 | Electron `nativeTheme` / `matchMedia` | **live** | portal `org.freedesktop.appearance color-scheme` |
 | GTK4 / libadwaita apps | restart | `~/.config/gtk-4.0/gtk.css` is read once per process |
@@ -201,7 +206,9 @@ mockups; that is a separate dep family.
 2. `bin/chroma-apply` reads the active theme's `colors.toml`, writes a managed
    libadwaita block into `gtk-4.0`, generates a GTK3 wrapper theme under
    `~/.local/share/themes`, updates both `settings.ini` files, and sets GNOME
-   `color-scheme` / `gtk-theme`.
+   `color-scheme` / `gtk-theme`. Omarchy's own `omarchy-theme-set-gnome` writes
+   `Adwaita` / `Adwaita-dark` earlier in the same switch (before any
+   `theme-set.d` hook); Chroma replaces that with the wrapper name.
 3. On a palette change it writes the **inactive** wrapper suffix and then
    switches the theme name. GTK3 re-reads its stylesheet, and Qt's gtk3
    platform theme re-reads named colors — both repaint live. An unchanged
@@ -296,6 +303,16 @@ documented below; we never kill a window that is in use to force a repaint.
 - **GTK4 / libadwaita** — reads `~/.config/gtk-4.0/gtk.css` once per process.
   Nautilus, Evince, Calendar, Text Editor, Loupe and friends need a restart
   after a switch. This is the one remaining restart-only toolkit.
+- **GTK3 apps built on libhandy** — GNOME Disks is the common one. Light
+  switches keep following live, but a **light → dark** switch pins the open
+  window to stock Adwaita until you relaunch it. `omarchy-theme-set-gnome`
+  writes `gtk-theme=Adwaita-dark` before user `theme-set` hooks run; libhandy's
+  `HdyStyleManager` sees the `-dark` name, strips it, installs `Adwaita` as an
+  *application* setting, and GTK3 then ignores every later session theme change
+  for that process. Light switches write plain `Adwaita`, which libhandy resets
+  instead of pinning, so they keep working. This is a libhandy + GTK3 behavior
+  triggered by Omarchy's ordering, not wrapper rotation; the legacy user-CSS
+  mode hits the same trigger. Relaunch the app once after the switch.
 - **GTK3** — live when `adw-gtk-theme` is installed. Without it the generated
   theme is built on stock Adwaita, whose CSS uses literal colors: Qt still
   recolors, but classic GTK3 chrome stays beige until you install
@@ -318,6 +335,13 @@ documented below; we never kill a window that is in use to force a repaint.
 - **LibreOffice** themes chrome via GTK; some notebook/brand strips stay LO's
   own blue. Document background is a LO setting (“use printer metrics” /
   white-document prefs), not Chroma.
+- **Momentary default theme during a switch** — `omarchy-theme-set-gnome` runs
+  before any `theme-set.d` hook and writes `gtk-theme=Adwaita` (light) or
+  `Adwaita-dark` (dark). GTK3 apps can paint that default for a moment until
+  Chroma's hook writes the wrapper name. Chroma cannot move itself ahead of
+  Omarchy's own theme commands, so the flash is the upstream ordering, not a
+  stale wrapper. On light themes it is Adwaita-light and easy to miss; on dark
+  themes it reads as the default gray.
 - **Plain GTK4 apps** (not libadwaita) fall back to GTK's built-in
   Default-light/dark because wrapper themes only carry `gtk-3.0`. They are
   mode-correct, not accent-colored.
