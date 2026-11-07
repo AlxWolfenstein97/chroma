@@ -3,21 +3,18 @@
 
 Writes:
   ~/.config/gtk-4.0/gtk.css          libadwaita @define-color palette
-  ~/.config/gtk-3.0/gtk.css          GTK3 palette (default, restart-only)
   ~/.local/share/themes/<base>-chroma-{a,b}/gtk-3.0/
-                                     opt-in live GTK3 theme (--gtk-wrapper)
+                                     generated GTK3 theme (Chroma block
+                                     appended to a copy of adw-gtk3/Adwaita)
   ~/.config/gtk-{3,4}.0/settings.ini theme / prefer-dark / font
   ~/.config/qt6ct/colors/omarchy.conf + qt6ct.conf   (when qt6ct is present)
   ~/.config/qt5ct/...                                (when qt5ct is present)
   ~/.local/share/chroma/root-sync/                   staging for root apps
   ~/.local/state/omarchy/chroma/state.json
 
-GTK3 and Qt are themed through ~/.config/gtk-3.0/gtk.css by default. GTK
-reads that file once per process, so a switch lands on the next launch: no
-theme-name rotation, no transitional Adwaita frame, and no libhandy pin. Pass
---gtk-wrapper (or CHROMA_GTK_WRAPPER=1) to opt into live repaints instead:
-Chroma then writes a generated wrapper theme and rotates its name so GTK3 and
-Qt's gtk3 platform theme re-read the palette without a relaunch.
+GTK3 and Qt are themed live: the active theme name points at a generated
+wrapper theme, and switching palette rotates between two wrapper names so
+GTK3 re-reads its CSS and Qt's gtk3 platform theme re-reads the palette.
 
 Also sets GNOME color-scheme + gtk-theme (preferring adw-gtk3 when installed),
 pushes QT_QPA_PLATFORMTHEME into the user systemd/dbus environment when Qt CT
@@ -76,7 +73,6 @@ STATE_FILE = STATE_DIR / "state.json"
 NO_GSETTINGS = os.environ.get("CHROMA_NO_GSETTINGS") == "1"
 NO_ROOT = os.environ.get("CHROMA_NO_ROOT") == "1"
 NO_QT_ENV = os.environ.get("CHROMA_NO_QT_ENV") == "1"
-GTK_WRAPPER = os.environ.get("CHROMA_GTK_WRAPPER") == "1"
 NO_GTK_WRAPPER = os.environ.get("CHROMA_NO_GTK_WRAPPER") == "1"
 
 WRAPPER_SUFFIXES = ("a", "b")
@@ -1273,32 +1269,21 @@ def main():
     ap.add_argument("--no-restart", action="store_true")
     ap.add_argument("--no-root", action="store_true")
     ap.add_argument("--revert", action="store_true")
-    live = ap.add_mutually_exclusive_group()
-    live.add_argument(
-        "--gtk-wrapper",
-        action="store_true",
-        help="opt into live GTK3/Qt repaints via a generated theme "
-        "(adds a transitional Adwaita frame and blank/relaunch libhandy "
-        "windows on dark switches; default is user CSS, restart-only)",
-    )
-    live.add_argument(
+    ap.add_argument(
         "--no-gtk-wrapper",
         action="store_true",
-        help="keep the user-CSS bridge (default; kept for compatibility)",
+        help="write ~/.config/gtk-3.0/gtk.css instead of a generated theme "
+        "(restart-only, legacy behavior)",
     )
     args = ap.parse_args()
 
-    global NO_ROOT
+    global NO_ROOT, NO_GTK_WRAPPER
     if args.revert:
         return do_revert()
     if args.no_root:
         NO_ROOT = True
-
-    requested_wrapper = GTK_WRAPPER and not NO_GTK_WRAPPER
-    if args.gtk_wrapper:
-        requested_wrapper = True
-    elif args.no_gtk_wrapper:
-        requested_wrapper = False
+    if args.no_gtk_wrapper:
+        NO_GTK_WRAPPER = True
 
     theme, err = load_theme(THEME_DIR)
     if theme is None:
@@ -1313,7 +1298,7 @@ def main():
     theme_name = display_name(THEME_DIR)
     gtk_theme = pick_gtk_theme(p["mode"])
     base_dir = find_theme_dir(gtk_theme)
-    wrapper_mode = requested_wrapper and base_dir is not None
+    wrapper_mode = not NO_GTK_WRAPPER and base_dir is not None
     font = current_font()
 
     prev = load_state()
@@ -1374,7 +1359,6 @@ def main():
     # Always reinforce Omarchy's gtk3 — undo any prior Chroma qt6ct override.
     qt_env = push_qt_env(enabled=False)
 
-    gtk_theme_ok = True
     if not NO_GSETTINGS:
         scheme = "prefer-light" if p["mode"] == "light" else "prefer-dark"
         if wrapper_mode:
@@ -1388,7 +1372,6 @@ def main():
             gsettings_set("gtk-theme", bounce)
             ok1 = gsettings_set("color-scheme", scheme)
             ok2 = gsettings_set("gtk-theme", gtk3_ini_theme)
-        gtk_theme_ok = ok2
         gsettings.update(
             {
                 "applied": ok1 and ok2,
@@ -1402,12 +1385,6 @@ def main():
         if current_theme:
             keep.add(current_theme)
         cleanup_wrappers(keep)
-    elif gtk_theme_ok:
-        # Default user-CSS mode owns no wrapper theme. Drop any left over from
-        # an earlier opt-in run so the theme list stays clean; only trees that
-        # carry Chroma's marker are removed. If the gsettings write failed,
-        # keep them: the active theme name may still point at a wrapper.
-        cleanup_wrappers(set())
 
     changed = any(
         s in (

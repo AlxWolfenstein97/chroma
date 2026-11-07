@@ -67,51 +67,42 @@ export CHROMA_WINDOWED_JSON="$tmp/clients.json"
 mkdir -p "$tmp/environment.d"
 printf 'QT_QPA_PLATFORMTHEME=qt6ct\n' >"$CHROMA_QT_ENV_FILE"
 
-# ---------------------------------------------------------------------------
-# Default mode: user CSS, restart-only. No wrapper rotation, no libhandy hint.
-# ---------------------------------------------------------------------------
 if out=$("$here/bin/chroma-apply" --no-restart --no-root); then
   pass "apply dark fixture"
 else
   bad "apply dark fixture"
 fi
-echo "$out" | grep -q 'gtk3 wrapper' \
-  && bad "default apply rotates a wrapper ($out)" \
-  || pass "default apply uses user CSS"
-echo "$out" | grep -q 'relaunch ' \
-  && bad "default mode reports libhandy relaunch" \
-  || pass "default mode does not report libhandy relaunch"
+
+# A switch to dark pins open libhandy windows to stock Adwaita; name them so
+# the user knows what to relaunch. Non-libhandy windows must stay quiet.
+echo "$out" | grep -q 'relaunch Disks (libhandy pinned to Adwaita)' \
+  && pass "dark switch reports libhandy relaunch" \
+  || bad "dark switch reports libhandy relaunch ($out)"
+echo "$out" | grep -q 'Nautilus' \
+  && bad "non-libhandy window reported" \
+  || pass "non-libhandy window not reported"
 
 grep -q 'accent_bg_color #ff3d9a' "$tmp/gtk4/gtk.css" && pass "gtk4 accent" || bad "gtk4 accent"
-grep -q 'chroma:managed' "$tmp/gtk3/gtk.css" 2>/dev/null \
-  && pass "default mode writes gtk3 user css" || bad "default mode writes gtk3 user css"
-grep -q 'theme_bg_color #0b0618' "$tmp/gtk3/gtk.css" 2>/dev/null \
-  && pass "gtk3 user css bg" || bad "gtk3 user css bg"
-base=$(sed -n 's/^gtk-theme-name=//p' "$tmp/gtk3/settings.ini")
-case $base in
-  '') bad "gtk3 base theme name is empty" ;;
-  *-chroma-a|*-chroma-b) bad "default mode points at a wrapper ($base)" ;;
-  *) pass "default mode uses base theme ($base)" ;;
-esac
-shopt -s nullglob
-default_wrappers=("$tmp/themes"/*-chroma-*)
-shopt -u nullglob
-((${#default_wrappers[@]} == 0)) \
-  && pass "default mode writes no wrappers" \
-  || bad "default mode left wrappers: ${default_wrappers[*]}"
 
 # Apply must not delete a user-owned environment.d file (ownership marker).
 [[ -f $CHROMA_QT_ENV_FILE ]] && grep -q 'qt6ct' "$CHROMA_QT_ENV_FILE" \
   && pass "apply keeps unowned environment.d file" \
   || bad "apply deleted an unowned environment.d file"
 
-[[ -f $tmp/state/state.json ]] && pass "state.json" || bad "state.json"
-grep -q '"enabled": false' "$tmp/state/state.json" \
-  && pass "state records legacy mode" || bad "state records legacy mode"
-[[ -f $tmp/stage/manifest.json ]] && pass "root stage manifest" || bad "root stage manifest"
-[[ -f $tmp/stage/gtk-3.0/gtk.css ]] && pass "root stage gtk3 css" || bad "root stage gtk3 css"
-[[ ! -d $tmp/stage/themes ]] \
-  && pass "legacy stage copies no wrapper" || bad "legacy stage copies a wrapper"
+# GTK3 uses a generated wrapper theme so it (and Qt) can repaint live.
+wrap=$(sed -n 's/^gtk-theme-name=//p' "$tmp/gtk3/settings.ini")
+case $wrap in
+  *-chroma-a|*-chroma-b) pass "gtk3 wrapper theme name ($wrap)" ;;
+  *) bad "gtk3 wrapper theme name ($wrap)" ;;
+esac
+wcss="$tmp/themes/$wrap/gtk-3.0/gtk.css"
+grep -q 'chroma:managed' "$wcss" 2>/dev/null && pass "wrapper carries managed block" || bad "wrapper carries managed block"
+grep -q 'theme_bg_color #0b0618' "$wcss" 2>/dev/null && pass "gtk3 wrapper bg" || bad "gtk3 wrapper bg"
+if [[ -f $tmp/gtk3/gtk.css ]] && grep -q 'chroma:managed' "$tmp/gtk3/gtk.css"; then
+  bad "wrapper mode leaves user gtk-3.0/gtk.css alone"
+else
+  pass "wrapper mode leaves user gtk-3.0/gtk.css alone"
+fi
 
 # Sidebar/places panes must read as a distinct surface from the file view.
 hex_luma() { local h=${1#\#}; echo $(( (0x${h:0:2} * 299 + 0x${h:2:2} * 587 + 0x${h:4:2} * 114) / 1000 )); }
@@ -124,12 +115,14 @@ else
   bad "sidebar brighter than view (view=$view_hex sidebar=$side_hex)"
 fi
 grep -q 'chroma:managed' "$tmp/gtk4/settings.ini" && pass "gtk4 settings.ini" || bad "gtk4 settings.ini"
+[[ -f $tmp/state/state.json ]] && pass "state.json" || bad "state.json"
+[[ -f $tmp/stage/manifest.json ]] && pass "root stage manifest" || bad "root stage manifest"
+[[ -f $tmp/stage/themes/$wrap/gtk-3.0/gtk.css ]] && pass "root stage theme" || bad "root stage theme"
 
-# Idempotent re-apply (same palette → same files, no rewrite).
+# Idempotent re-apply (same palette → same wrapper, no rewrite)
 out=$("$here/bin/chroma-apply" --no-restart --no-root)
 echo "$out" | grep -q 'gtk4 unchanged' && pass "idempotent gtk4" || bad "idempotent gtk4 ($out)"
-echo "$out" | grep -q 'gtk3 unchanged' && pass "idempotent gtk3" || bad "idempotent gtk3 ($out)"
-echo "$out" | grep -q "theme $base" && pass "idempotent base theme" || bad "idempotent base theme ($out)"
+echo "$out" | grep -q "gtk3 wrapper $wrap unchanged" && pass "idempotent wrapper" || bad "idempotent wrapper ($out)"
 
 # An empty Chroma-unique stub is safe to prune; a marked legacy file too.
 : >"$CHROMA_QT_ENV_FILE"
@@ -141,114 +134,43 @@ printf '# Managed by Chroma — legacy Qt override\nQT_QPA_PLATFORMTHEME=gtk3\n'
 [[ ! -e $CHROMA_QT_ENV_FILE ]] && pass "apply removes owned environment.d file" \
   || bad "apply leaves owned environment.d file"
 
-# A palette change in default mode updates the user CSS in place; the theme
-# name stays the base theme, so nothing rotates and no window is repainted.
+# Palette change rotates to the other wrapper name so GTK3/Qt reload live.
 sed -i 's/background = "#0B0618"/background = "#0B0620"/' "$tmp/theme/colors.toml"
 out=$("$here/bin/chroma-apply" --no-restart --no-root)
-grep -q 'theme_bg_color #0b0620' "$tmp/gtk3/gtk.css" 2>/dev/null \
-  && pass "default mode follows palette" || bad "default mode follows palette"
-[[ $(sed -n 's/^gtk-theme-name=//p' "$tmp/gtk3/settings.ini") == "$base" ]] \
-  && pass "default mode keeps base theme on change" \
-  || bad "default mode changed theme name on palette change"
-
-# ---------------------------------------------------------------------------
-# Live mode is opt-in: --gtk-wrapper generates a rotating theme so GTK3 and Qt
-# repaint without a relaunch.
-# ---------------------------------------------------------------------------
-out=$("$here/bin/chroma-apply" --no-restart --no-root --gtk-wrapper)
-echo "$out" | grep -q 'gtk3 wrapper' \
-  && pass "wrapper opt-in switches mode ($out)" \
-  || bad "wrapper opt-in switches mode ($out)"
-wrap=$(sed -n 's/^gtk-theme-name=//p' "$tmp/gtk3/settings.ini")
-case $wrap in
-  *-chroma-a|*-chroma-b) pass "gtk3 wrapper theme name ($wrap)" ;;
-  *) bad "gtk3 wrapper theme name ($wrap)" ;;
-esac
-wcss="$tmp/themes/$wrap/gtk-3.0/gtk.css"
-grep -q 'chroma:managed' "$wcss" 2>/dev/null && pass "wrapper carries managed block" || bad "wrapper carries managed block"
-grep -q 'theme_bg_color #0b0620' "$wcss" 2>/dev/null && pass "gtk3 wrapper bg" || bad "gtk3 wrapper bg"
-if [[ -f $tmp/gtk3/gtk.css ]] && grep -q 'chroma:managed' "$tmp/gtk3/gtk.css"; then
-  bad "wrapper mode strips user gtk3 block"
-else
-  pass "wrapper mode strips user gtk3 block"
-fi
-
-# A switch to dark pins open libhandy windows to stock Adwaita; name them so
-# the user knows what to relaunch. Non-libhandy windows must stay quiet.
-echo "$out" | grep -q 'relaunch Disks (libhandy pinned to Adwaita)' \
-  && pass "dark wrapper switch reports libhandy relaunch" \
-  || bad "dark wrapper switch reports libhandy relaunch ($out)"
-echo "$out" | grep -q 'Nautilus' \
-  && bad "non-libhandy window reported" \
-  || pass "non-libhandy window not reported"
-
-[[ -f $tmp/stage/themes/$wrap/gtk-3.0/gtk.css ]] && pass "root stage theme" || bad "root stage theme"
-
-# Persistent opt-in lives in the environment; the explicit off switch wins
-# over it and the one-shot flag wins over the environment.
-out=$(CHROMA_GTK_WRAPPER=1 "$here/bin/chroma-apply" --no-restart --no-root)
-echo "$out" | grep -q 'gtk3 wrapper' \
-  && pass "CHROMA_GTK_WRAPPER=1 opts in" || bad "CHROMA_GTK_WRAPPER=1 opts in ($out)"
-out=$(CHROMA_GTK_WRAPPER=1 "$here/bin/chroma-apply" --no-restart --no-root --no-gtk-wrapper)
-echo "$out" | grep -q 'gtk3 wrapper' \
-  && bad "--no-gtk-wrapper loses to env opt-in" \
-  || pass "--no-gtk-wrapper overrides env opt-in"
-grep -q 'chroma:managed' "$tmp/gtk3/gtk.css" 2>/dev/null \
-  && pass "override writes user css" || bad "override writes user css"
-out=$(CHROMA_NO_GTK_WRAPPER=1 "$here/bin/chroma-apply" --no-restart --no-root --gtk-wrapper)
-echo "$out" | grep -q 'gtk3 wrapper' \
-  && pass "--gtk-wrapper overrides env off switch" \
-  || bad "--gtk-wrapper overrides env off switch ($out)"
-out=$(CHROMA_GTK_WRAPPER=1 CHROMA_NO_GTK_WRAPPER=1 "$here/bin/chroma-apply" --no-restart --no-root)
-echo "$out" | grep -q 'gtk3 wrapper' \
-  && bad "CHROMA_NO_GTK_WRAPPER=1 loses to opt-in" \
-  || pass "CHROMA_NO_GTK_WRAPPER=1 wins over opt-in"
-
-# Palette change rotates to the other wrapper name so GTK3/Qt reload live.
-"$here/bin/chroma-apply" --no-restart --no-root --gtk-wrapper >/dev/null
-wrap=$(sed -n 's/^gtk-theme-name=//p' "$tmp/gtk3/settings.ini")
-sed -i 's/background = "#0B0620"/background = "#0B0628"/' "$tmp/theme/colors.toml"
-out=$("$here/bin/chroma-apply" --no-restart --no-root --gtk-wrapper)
 newwrap=$(sed -n 's/^gtk-theme-name=//p' "$tmp/gtk3/settings.ini")
 if [[ $newwrap != "$wrap" ]]; then
   pass "wrapper rotation ($wrap → $newwrap)"
 else
   bad "wrapper rotation did not change name ($newwrap)"
 fi
-grep -q 'theme_bg_color #0b0628' "$tmp/themes/$newwrap/gtk-3.0/gtk.css" 2>/dev/null \
+grep -q 'theme_bg_color #0b0620' "$tmp/themes/$newwrap/gtk-3.0/gtk.css" 2>/dev/null \
   && pass "rotated wrapper has new color" || bad "rotated wrapper has new color"
 [[ -f $tmp/stage/themes/$newwrap/gtk-3.0/gtk.css ]] \
   && pass "root stage follows active wrapper" || bad "root stage follows active wrapper"
 [[ ! -d $tmp/stage/themes/$wrap ]] \
   && pass "root stage prunes stale wrappers" || bad "root stage prunes stale wrappers"
 
+# Escape hatch keeps the old user-CSS bridge.
+base=${wrap%-chroma-*}
+out=$("$here/bin/chroma-apply" --no-restart --no-root --no-gtk-wrapper)
+grep -q 'chroma:managed' "$tmp/gtk3/gtk.css" 2>/dev/null && pass "legacy css escape hatch" || bad "legacy css escape hatch"
+grep -q "gtk-theme-name=$base" "$tmp/gtk3/settings.ini" \
+  && pass "legacy css uses base theme" || bad "legacy css uses base theme ($base)"
+echo "$out" | grep -q 'relaunch ' \
+  && bad "legacy css mode reports libhandy relaunch" \
+  || pass "legacy css mode does not report libhandy relaunch"
+
 # A switch to a light theme makes libhandy reset its pin instead of setting it,
 # so those windows recover live and no relaunch hint is needed.
 sed -i 's/mode = "dark"/mode = "light"/' "$tmp/theme/colors.toml"
-out=$("$here/bin/chroma-apply" --no-restart --no-root --gtk-wrapper)
+out=$("$here/bin/chroma-apply" --no-restart --no-root)
 echo "$out" | grep -q 'relaunch ' \
   && bad "light switch reports libhandy relaunch" \
   || pass "light switch does not report libhandy relaunch"
 sed -i 's/mode = "light"/mode = "dark"/' "$tmp/theme/colors.toml"
-"$here/bin/chroma-apply" --no-restart --no-root --gtk-wrapper >/dev/null
-
-# Escape hatch: default mode also prunes wrappers left by an earlier opt-in.
-out=$("$here/bin/chroma-apply" --no-restart --no-root --no-gtk-wrapper)
-grep -q 'chroma:managed' "$tmp/gtk3/gtk.css" 2>/dev/null \
-  && pass "escape hatch writes user css" || bad "escape hatch writes user css"
-[[ $(sed -n 's/^gtk-theme-name=//p' "$tmp/gtk3/settings.ini") == "$base" ]] \
-  && pass "escape hatch uses base theme" \
-  || bad "escape hatch uses base theme ($base)"
-shopt -s nullglob
-leftover=("$tmp/themes"/*-chroma-*)
-shopt -u nullglob
-((${#leftover[@]} == 0)) \
-  && pass "escape hatch prunes old wrappers" \
-  || bad "escape hatch leaves wrappers: ${leftover[*]}"
 
 # Revert restores the base theme before deleting generated wrappers.
 # It must also respect environment.d ownership.
-"$here/bin/chroma-apply" --no-restart --no-root --gtk-wrapper >/dev/null
 printf 'QT_QPA_PLATFORMTHEME=qt5ct\n' >"$CHROMA_QT_ENV_FILE"
 "$here/bin/chroma-apply" --revert >/dev/null
 [[ -f $CHROMA_QT_ENV_FILE ]] && grep -q 'qt5ct' "$CHROMA_QT_ENV_FILE" \
@@ -261,7 +183,7 @@ printf '# Managed by Chroma — legacy Qt override\n' >"$CHROMA_QT_ENV_FILE"
 [[ ! -f $tmp/gtk4/gtk.css ]] || ! grep -q 'chroma:managed' "$tmp/gtk4/gtk.css" \
   && pass "revert strips gtk4 block" || bad "revert strips gtk4 block"
 [[ ! -f $tmp/gtk3/gtk.css ]] || ! grep -q 'chroma:managed' "$tmp/gtk3/gtk.css" \
-  && pass "revert strips gtk3 block" || bad "revert strips gtk3 block"
+  && pass "revert strips legacy gtk3 block" || bad "revert strips legacy gtk3 block"
 shopt -s nullglob
 leftovers=("$tmp/themes"/*-chroma-*)
 shopt -u nullglob
