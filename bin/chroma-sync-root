@@ -1,8 +1,11 @@
 #!/usr/bin/python3
-"""chroma-sync-root — copy staged GTK/Qt theme files into /root/.config.
+"""chroma-sync-root — copy staged GTK/Qt theme files into root's config.
 
 Must run as root (via sudo -n from chroma-apply, or manually with sudo/pkexec).
 Only copies paths listed in the stage manifest; never follows unexpected paths.
+
+Generated GTK3 wrapper themes land in /root/.local/share/themes so root GTK
+apps can resolve the theme name written into /root/.config/gtk-3.0/settings.ini.
 """
 
 from __future__ import annotations
@@ -10,18 +13,22 @@ from __future__ import annotations
 import json
 import os
 import pwd
+import re
 import shutil
 import sys
 import tempfile
 from pathlib import Path
 
 ROOT_CONFIG = Path("/root/.config")
-ALLOWED_PREFIXES = (
+ROOT_DATA = Path("/root/.local/share")
+CONFIG_PREFIXES = (
     "gtk-3.0/",
     "gtk-4.0/",
     "qt5ct/",
     "qt6ct/",
 )
+DATA_PREFIXES = ("themes/",)
+WRAPPER_DIR_RE = re.compile(r"-chroma-[ab]$")
 
 
 def resolve_stage() -> Path:
@@ -85,19 +92,40 @@ def main() -> int:
         return 2
 
     copied = []
+    staged_themes = set()
     for rel in manifest.get("files") or []:
         rel = str(rel).lstrip("/")
-        if ".." in rel.split("/") or not rel.startswith(ALLOWED_PREFIXES):
+        if ".." in rel.split("/"):
+            print(f"chroma-sync-root: refusing {rel}", file=sys.stderr)
+            continue
+        if rel.startswith(CONFIG_PREFIXES):
+            base = ROOT_CONFIG
+        elif rel.startswith(DATA_PREFIXES):
+            base = ROOT_DATA
+            parts = rel.split("/")
+            if len(parts) > 1:
+                staged_themes.add(parts[1])
+        else:
             print(f"chroma-sync-root: refusing {rel}", file=sys.stderr)
             continue
         src = stage / rel
         if not src.is_file():
             continue
-        dest = ROOT_CONFIG / rel
+        dest = base / rel
         atomic_copy(src, dest)
         copied.append(rel)
 
-    print(f"chroma-sync-root: synced {len(copied)} files into {ROOT_CONFIG}")
+    # Drop wrapper themes from previous palettes; only inside a real directory
+    # (never through a symlink to the user's themes tree).
+    themes_root = ROOT_DATA / "themes"
+    if themes_root.is_dir() and not themes_root.is_symlink():
+        for entry in themes_root.iterdir():
+            if not entry.is_dir() or not WRAPPER_DIR_RE.search(entry.name):
+                continue
+            if entry.name not in staged_themes:
+                shutil.rmtree(entry, ignore_errors=True)
+
+    print(f"chroma-sync-root: synced {len(copied)} files into {ROOT_CONFIG} and {ROOT_DATA}")
     return 0
 
 

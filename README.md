@@ -16,6 +16,11 @@ GTK3, GTK4 / libadwaita, and Qt (via Omarchy's stock `QT_QPA_PLATFORMTHEME=gtk3`
 with the active theme's real colors — background, foreground, accent,
 destructive / success / warning — light and dark alike.
 
+GTK3 and Qt repaint **live**: Chroma writes a generated theme next to
+`adw-gtk3` and rotates between two copies on each palette change, so open
+windows follow without a relaunch. GTK4 / libadwaita is the exception — it
+reads user CSS once per process, so those apps still need a restart.
+
 No Appearance carousel. You are not picking between “GTK” and “Qt” like they were
 themes — you are feeding color data into the two toolkits almost every
 non-Electron Linux GUI shares. One hook, every `colors.toml` Omarchy knows
@@ -51,17 +56,49 @@ Inspired by [Accord](https://github.com/vonsensey/accord), which proved the GTK 
 
 - **GTK4 / libadwaita** — Nautilus, Evince, Calendar, Text Editor, Loupe, …
   via `~/.config/gtk-4.0/gtk.css` (the only user lever libadwaita honors).
-- **GTK3** — classic named colors + dialog polish in
-  `~/.config/gtk-3.0/gtk.css`, with `adw-gtk3` / `adw-gtk3-dark` when the
-  package is present so those variables actually stick.
-- **Qt 5 / Qt 6** — stays on Omarchy's `QT_QPA_PLATFORMTHEME=gtk3`, so Qt
-  inherits the GTK3 palette Chroma just wrote. No qt6ct, no Kvantum, no
+  Restart-only.
+- **GTK3 — live** — a generated theme under
+  `~/.local/share/themes/<base>-chroma-{a,b}` copies `adw-gtk3` (or stock
+  Adwaita when the package is missing) and appends Chroma's palette. Switching
+  themes alternates names so GTK3 re-reads its CSS and repaints open windows.
+- **Qt 5 / Qt 6 — live** — stays on Omarchy's `QT_QPA_PLATFORMTHEME=gtk3`, so
+  Qt inherits the GTK3 palette Chroma just wrote. Qt's gtk3 platform theme
+  re-reads the palette when the theme name changes. No qt6ct, no Kvantum, no
   shell-side icon side effects.
-- **Root apps (optional)** — one-time
-  `/root/.config/gtk-*` → your configs, so `sudo bleachbit` / pkexec GUIs
-  match. Password once; every later theme switch follows for free.
+- **Chromium-family chrome — already Omarchy's job** — `omarchy-theme-set-browser`
+  writes the theme's `chromium.theme` background into
+  `BrowserThemeColor` + `BrowserColorScheme: device` under
+  `/etc/chromium/policies/managed/color.json` (also Chrome, Edge, Brave), then
+  refreshes running browsers. Chroma does not duplicate or override that.
+  Firefox / Zen have no equivalent color policy: expect GTK-native controls
+  and light/dark `prefers-color-scheme`, not the full accent palette.
+- **Electron** — Electron is Chromium/Node, not a separate toolkit. Chroma
+  supplies what Electron does consume: GTK native widgets/dialogs, and portal
+  `prefers-color-scheme` for `nativeTheme`/`matchMedia` live. Verified with an
+  Electron 43 probe: `nativeTheme.shouldUseDarkColors` flips live in both
+  directions when Chroma changes `color-scheme`, with no restart. Omarchy
+  already syncs Obsidian and VS Code theme files on its own; Chroma adds the
+  GTK/portal layer, not another app theme. Apps that paint their own chrome,
+  or hardcode a theme on first run, stay their own. (There is no “Qt Electron”;
+  the Qt bridge only covers real Qt apps.)
+- **Root apps (optional)** — one-time `/root/.config/gtk-*` and
+  `/root/.local/share/themes` → your dirs, so `sudo bleachbit` / pkexec GUIs
+  launch with the active palette. A root window does not share your session
+  settings bus, so it does **not** repaint live on a switch — relaunch it.
+  Password once; later launches follow the current theme. On Wayland a root GUI
+  may need XWayland access (`xhost +SI:localuser:root`, revoke after); that is
+  a desktop-session concern, not something Chroma changes.
 - **Light and dark** — `color-scheme` and `gtk-theme` stay mode-correct,
   preferring adw-gtk3 over stock Adwaita when available.
+
+| Surface | On `omarchy theme set` | What makes it move |
+|---------|------------------------|--------------------|
+| GTK3 apps (user) | **live** | wrapper theme name flips a → b |
+| Qt 5 / Qt 6 apps (user) | **live** | gtk3 platform theme re-reads named colors |
+| Electron `nativeTheme` / `matchMedia` | **live** | portal `org.freedesktop.appearance color-scheme` |
+| GTK4 / libadwaita apps | restart | `~/.config/gtk-4.0/gtk.css` is read once per process |
+| Chromium-family browser chrome | Omarchy refresh | `BrowserThemeColor` policy; not Chroma |
+| Root GUI (`sudo` / pkexec) | restart | root links carry the palette; no shared settings bus |
 
 ## Marketplace consent (theme-set hook)
 
@@ -144,7 +181,7 @@ omarchy plugin enable io.github.alxwolfenstein97.chroma
 
 | Package | Why |
 |---------|-----|
-| `adw-gtk-theme` | GTK3 only honours libadwaita-style `@define-color`s when the active theme is `adw-gtk3` / `adw-gtk3-dark`. Without it Chroma still writes CSS, but classic GTK3 chrome often stays beige (Accord-like). |
+| `adw-gtk-theme` | Chroma copies `adw-gtk3` / `adw-gtk3-dark` into a generated wrapper theme. Without it the wrapper falls back to stock Adwaita, whose GTK3 CSS uses literal colors — Qt still recolors via `lookup_color`, but classic GTK3 chrome stays beige. |
 
 `omarchy pkg add` needs sudo. Interactive `install.sh` asks in that TTY.
 Shell-service `--quiet` never re-pulls `adw-gtk-theme` — that path only
@@ -161,17 +198,24 @@ mockups; that is a separate dep family.
 
 1. A script in `~/.config/omarchy/hooks/theme-set.d/chroma` runs at the end of
    every `omarchy theme set` / `theme refresh`.
-2. `bin/chroma-apply` reads the active theme's `colors.toml`, writes marked
-   managed blocks into `gtk-3.0` / `gtk-4.0` CSS + `settings.ini`, and sets
-   GNOME `color-scheme` / `gtk-theme`.
-3. A small shell **service** runs `install.sh --quiet` once at shell start
+2. `bin/chroma-apply` reads the active theme's `colors.toml`, writes a managed
+   libadwaita block into `gtk-4.0`, generates a GTK3 wrapper theme under
+   `~/.local/share/themes`, updates both `settings.ini` files, and sets GNOME
+   `color-scheme` / `gtk-theme`.
+3. On a palette change it writes the **inactive** wrapper suffix and then
+   switches the theme name. GTK3 re-reads its stylesheet, and Qt's gtk3
+   platform theme re-reads named colors — both repaint live. An unchanged
+   palette reuses the active wrapper and writes nothing.
+4. A small shell **service** runs `install.sh --quiet` once at shell start
    (restores the theme-set hook if already armed; skips package installs —
    deps are interactive / `arm-all` / `install.sh --yes`). It does **not**
    probe-and-reapply on a timer — the hook already covers switches, and a
    second path made boots/theme flips feel heavier than they needed to.
-4. Windowless GTK daemons (`--gapplication-service`) and
-   `xdg-desktop-portal-gtk` are restarted only on interactive apply when they
-   have no open window, so open apps are never killed mid-use.
+5. Windowless GTK daemons (`--gapplication-service`) are restarted when they
+   have no open window, so open apps are never killed mid-use. In wrapper mode
+   the GTK portal is *not* bounced — it live-updates, and killing it would
+   close an open file chooser. The legacy `--no-gtk-wrapper` mode keeps the
+   old portal restart.
 
 Idempotent: unchanged themes write nothing (byte-compared before write).
 
@@ -179,8 +223,11 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
 
 **Writes**
 
-- `~/.config/gtk-4.0/gtk.css` and `gtk-3.0/gtk.css` — marked
-  `chroma:managed` block; pre-existing user CSS is backed up once and kept.
+- `~/.config/gtk-4.0/gtk.css` — marked `chroma:managed` block; pre-existing
+  user CSS is backed up once and kept.
+- `~/.local/share/themes/<base>-chroma-{a,b}/gtk-3.0/` — generated GTK3 theme
+  built from `adw-gtk3*` (or Adwaita) with the Chroma block appended. The next
+  palette change rewrites the inactive copy, so two directories alternate.
 - `~/.config/gtk-{3,4}.0/settings.ini` — theme name, prefer-dark, font
   (no icon / cursor keys — Omarchy owns those).
 - Two gsettings keys: `color-scheme`, `gtk-theme` (originals saved for revert).
@@ -188,16 +235,29 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
 
 **Optional ( `--with-root` )**
 
-- Symlinks `/root/.config/{gtk-3.0,gtk-4.0}` → your matching dirs.
+- Symlinks `/root/.config/{gtk-3.0,gtk-4.0,qt6ct,qt5ct}` and
+  `/root/.local/share/themes` → your matching dirs.
 - On a TTY (arm-all / interactive / wipe), elevation uses `sudo` so the
   password lands in the same terminal; `pkexec` is only the non-TTY fallback.
 - Apply runs **before** the root link so user GTK dirs exist before
   `/root/.config` points at them.
+- Users who linked before wrapper themes existed need one re-run:
+  `./install.sh --with-root` (it notices the missing themes link).
+
+**Escape hatch**
+
+- `--no-gtk-wrapper` (one run) or `CHROMA_NO_GTK_WRAPPER=1` (persistent —
+  export it before the theme-set hook runs) writes the old user CSS in
+  `~/.config/gtk-3.0/gtk.css` instead. That path is restart-only for GTK3 and
+  Qt; nothing else changes.
 
 **Does not**
 
 - Touch icon or cursor themes.
 - Force `QT_QPA_PLATFORMTHEME` away from Omarchy's `gtk3`.
+- Delete an unmarked `~/.config/environment.d/99-chroma-qt.conf` — apply and
+  revert remove only files carrying the `Managed by Chroma` marker (or an
+  empty Chroma-unique stub), matching the installer/uninstaller ownership rule.
 - Network. Ever.
 - Kill any app that owns a visible window.
 - Theme the open web, Steam chrome, or any app that ignores platform colors.
@@ -218,7 +278,7 @@ omarchy plugin add https://github.com/AlxWolfenstein97/chroma.git --enable
 | Action | What happens |
 |--------|----------------|
 | `omarchy plugin disable …` | Shell service stops. **Theme hook still runs** — apps stay chromed on every theme switch. |
-| `./uninstall.sh` then disable / remove | Hook gone, CSS stripped, gsettings restored. Quiet Service only restores what was already armed — after wipe that’s nothing until a loud install. This TTY: root symlink / sudoers teardown (sudo) + optional y/N `pkg drop` of packages this install recorded pulling (`adw-gtk-theme` when ledgered). |
+| `./uninstall.sh` then disable / remove | Hook gone, generated wrappers + CSS stripped, gsettings restored. Quiet Service only restores what was already armed — after wipe that’s nothing until a loud install. This TTY: root symlink / sudoers teardown (sudo) + optional y/N `pkg drop` of packages this install recorded pulling (`adw-gtk-theme` when ledgered). |
 | `omarchy pkg drop adw-gtk-theme` | Optional — only if this install recorded pulling it; may fail/stay if something else still requires it. Back to stock Adwaita when dropped. |
 
 **Full wipe** — one shot (`--yes` skips pkg Y/n, ledger-only drops of packages this install recorded pulling (may fail and stay if something else still needs them — e.g. Goverlay after Pillow), and removes the plugin):
@@ -229,22 +289,41 @@ omarchy plugin add https://github.com/AlxWolfenstein97/chroma.git --enable
 
 ## Limits, honestly
 
-Most GTK and Qt apps are **not live**. Chroma writes the CSS / settings the
-moment you switch themes; open windows often keep the previous paint until
-you restart them. Same class of limitation [Accord](https://github.com/vonsensey/accord)
-hit — probably not really fixable without killing windows mid-use, which we
-refuse to do.
+Most GTK3 and Qt apps now follow a theme switch **live** — Chroma swaps the
+active theme name instead of only rewriting user CSS. What still lags is
+documented below; we never kill a window that is in use to force a repaint.
 
-- **GTK apps** — many need a restart after a theme switch. The **file manager**
-  (Nautilus) is especially finicky: close it fully, and sometimes an extra
-  theme flip helps the next open pick up the new palette.
-- **Qt** — picks the palette up at launch, not live. Relaunch after a switch.
+- **GTK4 / libadwaita** — reads `~/.config/gtk-4.0/gtk.css` once per process.
+  Nautilus, Evince, Calendar, Text Editor, Loupe and friends need a restart
+  after a switch. This is the one remaining restart-only toolkit.
+- **GTK3** — live when `adw-gtk-theme` is installed. Without it the generated
+  theme is built on stock Adwaita, whose CSS uses literal colors: Qt still
+  recolors, but classic GTK3 chrome stays beige until you install
+  `adw-gtk-theme` and re-apply.
+- **Qt** — live with `QT_QPA_PLATFORMTHEME=gtk3` (Omarchy's default). If you
+  force qt6ct/Kvantum yourself, Chroma no longer guarantees the bridge.
+- **Root GUIs** (`sudo bleachbit`, pkexec) — themed from the shared root links,
+  but restart-only in practice: a root process launched from your session still
+  reads its own settings, so an already-open root window keeps the old palette.
+  Relaunch it; Chroma will not kill it for you.
+- **Chromium / Electron** — Chromium-family browser chrome is Omarchy's existing
+  `chromium.theme` policy (background color only); Chroma adds the GTK frame and
+  live portal `prefers-color-scheme`. Electron follows the same portal signal
+  for `nativeTheme` / `matchMedia` and uses GTK for native dialogs, but its own
+  web chrome may not. Obsidian's onboarding, for example, hardcodes its dark
+  body. There is no Qt-based Electron toolkit to target.
 - **Apps with their own skins** (OBS themes, Steam, some Electron) ignore
   platform GTK/Qt colors. Use a dedicated extender (OmaOBS, Omacord, …) or leave them — do not expect Chroma to invent a contract
   that is not there.
 - **LibreOffice** themes chrome via GTK; some notebook/brand strips stay LO's
   own blue. Document background is a LO setting (“use printer metrics” /
   white-document prefs), not Chroma.
+- **Plain GTK4 apps** (not libadwaita) fall back to GTK's built-in
+  Default-light/dark because wrapper themes only carry `gtk-3.0`. They are
+  mode-correct, not accent-colored.
+- **High-contrast themes** are not a wrapper base; the generated theme always
+  starts from `adw-gtk3*` or Adwaita. If you need high contrast, use
+  `--no-gtk-wrapper`.
 - **Flatpak** needs the usual hole:
   `flatpak override --user --filesystem=xdg-config/gtk-4.0:ro <app>`.
 - We recolor stock Adwaita / adw-gtk3 rather than shipping a full theme

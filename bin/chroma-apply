@@ -3,17 +3,24 @@
 
 Writes:
   ~/.config/gtk-4.0/gtk.css          libadwaita @define-color palette
-  ~/.config/gtk-3.0/gtk.css          classic named colors (+ dialog polish)
+  ~/.local/share/themes/<base>-chroma-{a,b}/gtk-3.0/
+                                     generated GTK3 theme (Chroma block
+                                     appended to a copy of adw-gtk3/Adwaita)
   ~/.config/gtk-{3,4}.0/settings.ini theme / prefer-dark / font
   ~/.config/qt6ct/colors/omarchy.conf + qt6ct.conf   (when qt6ct is present)
   ~/.config/qt5ct/...                                (when qt5ct is present)
   ~/.local/share/chroma/root-sync/                   staging for root apps
   ~/.local/state/omarchy/chroma/state.json
 
+GTK3 and Qt are themed live: the active theme name points at a generated
+wrapper theme, and switching palette rotates between two wrapper names so
+GTK3 re-reads its CSS and Qt's gtk3 platform theme re-reads the palette.
+
 Also sets GNOME color-scheme + gtk-theme (preferring adw-gtk3 when installed),
 pushes QT_QPA_PLATFORMTHEME into the user systemd/dbus environment when Qt CT
-is available, and optionally syncs the staged files into /root/.config so
-pkexec'd GUIs (BleachBit-as-root) and similar pick up the same palette.
+is available, and optionally syncs the staged files into /root/.config (and
+/root/.local/share/themes) so pkexec'd GUIs (BleachBit-as-root) and similar
+pick up the same palette.
 
 Exit: 0 applied/reverted; 3 nothing applied (bad theme input).
 """
@@ -21,6 +28,7 @@ Exit: 0 applied/reverted; 3 nothing applied (bad theme input).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -52,15 +60,22 @@ GTK4_INI = _env_path("CHROMA_GTK4_INI", HOME / ".config/gtk-4.0/settings.ini")
 GTK3_INI = _env_path("CHROMA_GTK3_INI", HOME / ".config/gtk-3.0/settings.ini")
 QT6_DIR = _env_path("CHROMA_QT6_DIR", HOME / ".config/qt6ct")
 QT5_DIR = _env_path("CHROMA_QT5_DIR", HOME / ".config/qt5ct")
-STATE_DIR = _env_path("CHROMA_STATE_DIR", _state_default())
-ROOT_STAGE = _env_path(
-    "CHROMA_ROOT_STAGE",
-    Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share")) / "chroma/root-sync",
+QT_ENV_FILE = _env_path(
+    "CHROMA_QT_ENV_FILE", HOME / ".config/environment.d/99-chroma-qt.conf"
 )
+STATE_DIR = _env_path("CHROMA_STATE_DIR", _state_default())
+DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share"))
+THEMES_DIR = _env_path("CHROMA_THEMES_DIR", DATA_HOME / "themes")
+ROOT_STAGE = _env_path("CHROMA_ROOT_STAGE", DATA_HOME / "chroma/root-sync")
 STATE_FILE = STATE_DIR / "state.json"
 NO_GSETTINGS = os.environ.get("CHROMA_NO_GSETTINGS") == "1"
 NO_ROOT = os.environ.get("CHROMA_NO_ROOT") == "1"
 NO_QT_ENV = os.environ.get("CHROMA_NO_QT_ENV") == "1"
+NO_GTK_WRAPPER = os.environ.get("CHROMA_NO_GTK_WRAPPER") == "1"
+
+WRAPPER_SUFFIXES = ("a", "b")
+WRAPPER_FINGERPRINT = ".chroma-fingerprint"
+THEME_SEARCH = (Path("/usr/share/themes"), THEMES_DIR, HOME / ".themes")
 
 BEGIN = "/* >>> chroma:managed >>> generated from the active Omarchy theme; edits inside this block are overwritten */"
 END = "/* <<< chroma:managed <<< */"
@@ -481,14 +496,152 @@ def revert_file(path: Path):
 
 
 def theme_available(name: str) -> bool:
-    for base in (
-        Path("/usr/share/themes"),
-        HOME / ".local/share/themes",
-        HOME / ".themes",
-    ):
-        if (base / name).is_dir():
-            return True
-    return False
+    return find_theme_dir(name) is not None
+
+
+def find_theme_dir(name: str):
+    for base in THEME_SEARCH:
+        candidate = base / name
+        if (candidate / "gtk-3.0").is_dir():
+            return candidate
+    return None
+
+
+def wrapper_candidates(base: str) -> tuple[str, str]:
+    return tuple(f"{base}-chroma-{suffix}" for suffix in WRAPPER_SUFFIXES)
+
+
+def wrapper_fingerprint(base_dir: Path, block: str) -> str:
+    h = hashlib.sha256(block.encode("utf-8", "surrogateescape"))
+    for name in ("gtk.css", "gtk-dark.css"):
+        try:
+            st = (base_dir / "gtk-3.0" / name).stat()
+        except OSError:
+            continue
+        h.update(f"{name}:{st.st_size}:{st.st_mtime_ns}".encode())
+    return h.hexdigest()
+
+
+def wrapper_matches(path: Path, fingerprint: str) -> bool:
+    try:
+        stored = (path / WRAPPER_FINGERPRINT).read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    if stored != fingerprint:
+        return False
+    css = path / "gtk-3.0" / "gtk.css"
+    try:
+        return css.is_file() and BEGIN in read_file(css)
+    except OSError:
+        return False
+
+
+def build_wrapper(target: Path, base_dir: Path, block: str, fingerprint: str) -> str:
+    """Atomically write a generated GTK3 theme by copying the base theme."""
+    existed = target.exists()
+    THEMES_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = THEMES_DIR / f".{target.name}.tmp-{os.getpid()}"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True)
+    try:
+        src = base_dir / "gtk-3.0"
+        shutil.copytree(src, tmp / "gtk-3.0", symlinks=True)
+        appended = False
+        for css in sorted((tmp / "gtk-3.0").glob("*.css")):
+            text = read_file(css)
+            span = find_block_span(text)
+            if span is not None:
+                text = text[: span[0]] + text[span[1] :]
+            atomic_write(css, text.rstrip("\n") + "\n\n" + block)
+            appended = True
+        if not appended:
+            atomic_write(tmp / "gtk-3.0" / "gtk.css", block)
+        atomic_write(tmp / WRAPPER_FINGERPRINT, fingerprint + "\n")
+        trash = None
+        if target.exists():
+            trash = THEMES_DIR / f".{target.name}.old-{os.getpid()}"
+            shutil.rmtree(trash, ignore_errors=True)
+            os.replace(target, trash)
+        os.replace(tmp, target)
+        if trash is not None:
+            shutil.rmtree(trash, ignore_errors=True)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    return "updated" if existed else "created"
+
+
+def prepare_wrapper(
+    base_dir: Path, p, current_theme, state
+) -> tuple[str, str, bool]:
+    """Pick and (re)generate the wrapper for this palette.
+
+    Returns (theme name, status, name_changed). The active wrapper is reused
+    when its fingerprint already matches, so re-applying an unchanged theme
+    does not rotate names or force a needless repaint. A palette change writes
+    the *inactive* suffix so the theme name always changes.
+    """
+    base = base_dir.name
+    first, second = wrapper_candidates(base)
+    block = render_block(gtk3_defines(p), gtk_extra_css(p))
+    fingerprint = wrapper_fingerprint(base_dir, block)
+
+    active = None
+    for name in (first, second):
+        if current_theme == name and (THEMES_DIR / name).is_dir():
+            active = name
+            break
+    if active is None:
+        remembered = state.get("gtk_wrapper", {}).get("name")
+        if remembered in (first, second) and (THEMES_DIR / remembered).is_dir():
+            active = remembered
+
+    if active and wrapper_matches(THEMES_DIR / active, fingerprint):
+        return active, "unchanged", False
+
+    target = second if active == first else first
+    target_path = THEMES_DIR / target
+    if wrapper_matches(target_path, fingerprint):
+        return target, "unchanged", target != current_theme
+
+    status = build_wrapper(target_path, base_dir, block, fingerprint)
+    return target, status, True
+
+
+def cleanup_wrappers(keep: set[str]):
+    """Drop stale generated wrappers; only trees carrying the Chroma marker."""
+    if not THEMES_DIR.is_dir():
+        return
+    for entry in THEMES_DIR.iterdir():
+        if entry.name in keep or not entry.is_dir():
+            continue
+        if not re.search(r"-chroma-[ab]$", entry.name):
+            continue
+        css = entry / "gtk-3.0" / "gtk.css"
+        try:
+            if not css.is_file() or BEGIN not in read_file(css):
+                continue
+        except OSError:
+            continue
+        shutil.rmtree(entry, ignore_errors=True)
+
+
+def remove_wrappers() -> int:
+    removed = 0
+    if not THEMES_DIR.is_dir():
+        return removed
+    for entry in THEMES_DIR.iterdir():
+        if not entry.is_dir() or not re.search(r"-chroma-[ab]$", entry.name):
+            continue
+        css = entry / "gtk-3.0" / "gtk.css"
+        try:
+            if not css.is_file() or BEGIN not in read_file(css):
+                continue
+        except OSError:
+            continue
+        shutil.rmtree(entry, ignore_errors=True)
+        removed += 1
+    return removed
 
 
 def pick_gtk_theme(mode: str) -> str:
@@ -680,6 +833,30 @@ def write_qtct(qt_dir: Path, p, conf_name: str) -> dict:
     }
 
 
+def cleanup_qt_env_file() -> str:
+    """Drop only a Chroma-owned or empty legacy Qt environment override.
+
+    install.sh and uninstall.sh both require the exact "Managed by Chroma"
+    ownership marker before removing a shared path. apply/revert must use the
+    same rule: an unmarked user-written 99-chroma-qt.conf is left untouched.
+    """
+    env_file = QT_ENV_FILE
+    if not env_file.exists():
+        return "absent"
+    try:
+        owned = "Managed by Chroma" in read_file(env_file)
+        empty = env_file.stat().st_size == 0
+    except OSError:
+        return f"kept {env_file.name} (unreadable)"
+    if not (owned or empty):
+        return f"kept {env_file.name} (not owned)"
+    try:
+        env_file.unlink()
+    except OSError:
+        return f"could not remove {env_file.name}"
+    return "removed"
+
+
 def push_qt_env(enabled: bool) -> str:
     """Keep Omarchy's QT_QPA_PLATFORMTHEME=gtk3.
 
@@ -688,8 +865,9 @@ def push_qt_env(enabled: bool) -> str:
     themed fallback for places/mimetypes icons got weaker under qt6ct.
     Accord-style gtk3 inheritance is the conservative path.
     """
+    cleanup = cleanup_qt_env_file()
     if NO_QT_ENV:
-        return "skipped"
+        return "skipped" if cleanup == "absent" else f"skipped ({cleanup})"
     value = "gtk3"
     try:
         subprocess.run(
@@ -703,14 +881,8 @@ def push_qt_env(enabled: bool) -> str:
             timeout=10,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return "failed"
-
-    env_dir = HOME / ".config/environment.d"
-    env_file = env_dir / "99-chroma-qt.conf"
-    # Remove any leftover override; Omarchy defaults already set gtk3.
-    if env_file.exists():
-        env_file.unlink()
-    return value
+        return "failed" if cleanup == "absent" else f"failed ({cleanup})"
+    return value if cleanup == "absent" else f"{value} ({cleanup})"
 
 
 def gsettings_get(key: str):
@@ -842,20 +1014,23 @@ def discover_service_apps() -> set[str]:
     return found
 
 
-def restart_apps():
+def restart_apps(kill_portal: bool = True):
     names = discover_service_apps()
     candidates = {name: pids for name in names if (pids := running_pids(name))}
-    # Always bounce the GTK portal so file choosers / settings pick up CSS.
+    # Legacy CSS mode needs the GTK portal bounced so file choosers reload.
+    # Wrapper mode live-updates the portal, and killing it would close an open
+    # file chooser mid-use — exactly what we refuse to do.
     portal_restarted = False
-    try:
-        subprocess.run(
-            ["pkill", "-u", str(os.getuid()), "-f", "xdg-desktop-portal-gtk"],
-            capture_output=True,
-            timeout=5,
-        )
-        portal_restarted = True
-    except (OSError, subprocess.TimeoutExpired):
-        pass
+    if kill_portal:
+        try:
+            subprocess.run(
+                ["pkill", "-u", str(os.getuid()), "-f", "xdg-desktop-portal-gtk"],
+                capture_output=True,
+                timeout=5,
+            )
+            portal_restarted = True
+        except (OSError, subprocess.TimeoutExpired):
+            pass
 
     if not candidates:
         return (["xdg-desktop-portal-gtk"] if portal_restarted else []), []
@@ -882,7 +1057,7 @@ def restart_apps():
     return restarted, pending
 
 
-def stage_root(files: dict[str, Path]):
+def stage_root(files: dict[str, Path], theme_dir: Path | None = None):
     """Mirror themed files into a staging tree for chroma-sync-root."""
     ROOT_STAGE.mkdir(parents=True, exist_ok=True)
     mirrored = []
@@ -893,11 +1068,32 @@ def stage_root(files: dict[str, Path]):
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
         mirrored.append(rel)
+    if theme_dir is not None and theme_dir.is_dir():
+        rel_base = Path("themes") / theme_dir.name
+        dest_base = ROOT_STAGE / rel_base
+        if dest_base.exists():
+            shutil.rmtree(dest_base)
+        shutil.copytree(theme_dir, dest_base, symlinks=True)
+        for path in sorted(dest_base.rglob("*")):
+            if path.is_file():
+                mirrored.append(str(path.relative_to(ROOT_STAGE)))
+
+    # Only the active palette needs to be staged. Without this the stage grows
+    # one full wrapper copy per theme flip until the user clears it by hand.
+    stage_themes = ROOT_STAGE / "themes"
+    if stage_themes.is_dir():
+        for entry in stage_themes.iterdir():
+            if not entry.is_dir() or not re.search(r"-chroma-[ab]$", entry.name):
+                continue
+            if theme_dir is not None and entry.name == theme_dir.name:
+                continue
+            shutil.rmtree(entry, ignore_errors=True)
+
     manifest = {
         "schemaVersion": 1,
         "generatedAt": int(time.time()),
         "files": mirrored,
-        "note": "Install sudoers via install.sh, then chroma-sync-root copies these into /root/.config",
+        "note": "Install sudoers via install.sh, then chroma-sync-root copies these into /root/.config and /root/.local/share",
     }
     atomic_write(
         ROOT_STAGE / "manifest.json",
@@ -921,7 +1117,15 @@ def try_sync_root() -> str:
 
     linked = STATE_DIR / "root-linked"
     if linked.exists():
-        return "linked"
+        try:
+            marker = linked.read_text(encoding="utf-8")
+        except OSError:
+            marker = ""
+        # Older link-root installs lack the themes symlink; root GTK apps
+        # would not find generated wrapper themes. Ask for a one-time re-link.
+        if "themes" in marker:
+            return "linked"
+        return "needs-link"
 
     sync = Path(__file__).resolve().parent / "chroma-sync-root"
     if not sync.exists():
@@ -964,11 +1168,6 @@ def try_sync_root() -> str:
 
 def do_revert() -> int:
     state = load_state()
-    r4 = revert_file(GTK4_CSS)
-    r3 = revert_file(GTK3_CSS)
-    for ini in (GTK4_INI, GTK3_INI):
-        if ini.exists() and "# chroma:managed" in read_file(ini):
-            ini.unlink()
     saved = state.get("gsettings", {}).get("saved") or {}
     restored, failed = [], []
     if not NO_GSETTINGS:
@@ -991,17 +1190,36 @@ def do_revert() -> int:
                         restored = ["via omarchy-theme-set-gnome"]
                 except (OSError, subprocess.TimeoutExpired):
                     pass
+
+    r4 = revert_file(GTK4_CSS)
+    r3 = revert_file(GTK3_CSS)
+    for ini in (GTK4_INI, GTK3_INI):
+        if ini.exists() and "# chroma:managed" in read_file(ini):
+            ini.unlink()
     push_qt_env(enabled=False)
+
+    # Restore the real theme before deleting the wrapper it points at: if the
+    # gsettings write failed, keep the wrapper so the current theme still
+    # resolves until the user retries.
     if failed:
         print(
             f"chroma: reverted css (gtk4: {r4}, gtk3: {r3}) but could not "
-            f"restore gsettings: {', '.join(failed)}",
+            f"restore gsettings: {', '.join(failed)}; keeping GTK3 wrappers",
             file=sys.stderr,
         )
         return 0
+
+    removed = remove_wrappers()
+    # The stage is generated for chroma-sync-root; a revert should not leave a
+    # full copy of the old palette behind.
+    if ROOT_STAGE.is_dir():
+        shutil.rmtree(ROOT_STAGE, ignore_errors=True)
     STATE_FILE.unlink(missing_ok=True)
     gs = ", ".join(restored) if restored else "nothing to restore"
-    print(f"chroma: reverted (gtk4: {r4}, gtk3: {r3}, gsettings: {gs})")
+    print(
+        f"chroma: reverted (gtk4: {r4}, gtk3: {r3}, "
+        f"wrappers: {removed}, gsettings: {gs})"
+    )
     return 0
 
 
@@ -1010,13 +1228,21 @@ def main():
     ap.add_argument("--no-restart", action="store_true")
     ap.add_argument("--no-root", action="store_true")
     ap.add_argument("--revert", action="store_true")
+    ap.add_argument(
+        "--no-gtk-wrapper",
+        action="store_true",
+        help="write ~/.config/gtk-3.0/gtk.css instead of a generated theme "
+        "(restart-only, legacy behavior)",
+    )
     args = ap.parse_args()
 
+    global NO_ROOT, NO_GTK_WRAPPER
     if args.revert:
         return do_revert()
     if args.no_root:
-        global NO_ROOT
         NO_ROOT = True
+    if args.no_gtk_wrapper:
+        NO_GTK_WRAPPER = True
 
     theme, err = load_theme(THEME_DIR)
     if theme is None:
@@ -1030,6 +1256,8 @@ def main():
     p = build_palette(theme)
     theme_name = display_name(THEME_DIR)
     gtk_theme = pick_gtk_theme(p["mode"])
+    base_dir = find_theme_dir(gtk_theme)
+    wrapper_mode = not NO_GTK_WRAPPER and base_dir is not None
     font = current_font()
 
     prev = load_state()
@@ -1048,10 +1276,41 @@ def main():
             early["gsettings"] = {"applied": False, "saved": gsettings["saved"]}
             save_state(early)
 
+    current_theme = None if NO_GSETTINGS else gsettings_get("gtk-theme")
+    if current_theme is None:
+        current_theme = prev.get("gtk_wrapper", {}).get("name")
+
     s4 = write_managed(GTK4_CSS, render_block(gtk4_defines(p), gtk_extra_css(p)))
-    s3 = write_managed(GTK3_CSS, render_block(gtk3_defines(p), gtk_extra_css(p)))
-    i4 = write_settings_ini(GTK4_INI, gtk_theme, p["mode"], font)
-    i3 = write_settings_ini(GTK3_INI, gtk_theme, p["mode"], font)
+    wrapper_name = None
+    wrapper_status = "disabled"
+    wrapper_changed = False
+    if wrapper_mode:
+        try:
+            wrapper_name, wrapper_status, wrapper_changed = prepare_wrapper(
+                base_dir, p, current_theme, prev
+            )
+        except OSError as e:
+            print(
+                f"chroma: cannot write GTK3 wrapper theme ({e}); "
+                "falling back to user CSS",
+                file=sys.stderr,
+            )
+            wrapper_mode = False
+
+    if wrapper_mode:
+        # A generated theme replaces the user-CSS bridge: strip any managed
+        # block a previous Chroma install left behind.
+        s3 = revert_file(GTK3_CSS)
+        gtk3_ini_theme = wrapper_name
+        gtk4_ini_theme = gtk_theme
+    else:
+        s3 = write_managed(
+            GTK3_CSS, render_block(gtk3_defines(p), gtk_extra_css(p))
+        )
+        gtk3_ini_theme = gtk_theme
+        gtk4_ini_theme = gtk_theme
+    i4 = write_settings_ini(GTK4_INI, gtk4_ini_theme, p["mode"], font)
+    i3 = write_settings_ini(GTK3_INI, gtk3_ini_theme, p["mode"], font)
 
     # Optional qt*ct color files if those tools exist — never flip platform theme.
     qt6 = write_qtct(QT6_DIR, p, "qt6ct") if shutil.which("qt6ct") else {"status": "skipped", "reason": "unused"}
@@ -1061,30 +1320,52 @@ def main():
 
     if not NO_GSETTINGS:
         scheme = "prefer-light" if p["mode"] == "light" else "prefer-dark"
-        # Theme-name bounce forces some GTK3 consumers to reload.
-        bounce = gtk_theme + "-chroma-bounce"
-        gsettings_set("gtk-theme", bounce)
-        ok1 = gsettings_set("color-scheme", scheme)
-        ok2 = gsettings_set("gtk-theme", gtk_theme)
+        if wrapper_mode:
+            # Set the scheme first so portals/Chromium see the mode change,
+            # then swap the theme name so GTK3 and Qt re-read the palette.
+            ok1 = gsettings_set("color-scheme", scheme)
+            ok2 = gsettings_set("gtk-theme", gtk3_ini_theme)
+        else:
+            # Theme-name bounce forces some GTK3 consumers to reload.
+            bounce = gtk_theme + "-chroma-bounce"
+            gsettings_set("gtk-theme", bounce)
+            ok1 = gsettings_set("color-scheme", scheme)
+            ok2 = gsettings_set("gtk-theme", gtk3_ini_theme)
         gsettings.update(
             {
                 "applied": ok1 and ok2,
                 "color_scheme": scheme,
-                "gtk_theme": gtk_theme,
+                "gtk_theme": gtk3_ini_theme,
             }
         )
 
+    if wrapper_mode:
+        keep = {wrapper_name}
+        if current_theme:
+            keep.add(current_theme)
+        cleanup_wrappers(keep)
+
     changed = any(
-        s in ("created", "updated", "merged") for s in (s4, s3, i4, i3)
+        s in (
+            "created",
+            "updated",
+            "merged",
+            "stripped",
+            "stripped-kept-backup",
+            "restored-backup",
+            "removed",
+        )
+        for s in (s4, s3, i4, i3)
     ) or qt6.get("colors") in ("updated", "created") or qt6.get("conf") in (
         "updated",
         "created",
-    )
+    ) or (wrapper_mode and wrapper_changed)
 
     restarted, pending = ([], [])
     if not args.no_restart and changed:
-        restarted, pending = restart_apps()
+        restarted, pending = restart_apps(kill_portal=not wrapper_mode)
 
+    wrapper_path = (THEMES_DIR / wrapper_name) if wrapper_name else None
     staged = stage_root(
         {
             "gtk-4.0/gtk.css": GTK4_CSS,
@@ -1095,13 +1376,16 @@ def main():
             "qt6ct/colors/omarchy.conf": QT6_DIR / "colors/omarchy.conf",
             "qt5ct/qt5ct.conf": QT5_DIR / "qt5ct.conf",
             "qt5ct/colors/omarchy.conf": QT5_DIR / "colors/omarchy.conf",
-        }
+        },
+        theme_dir=wrapper_path,
     )
     # Only attempt elevation plumbing when something themed changed, or we
     # have never recorded a root status. Linked setups need no further work.
     prev_root = (prev or {}).get("root", {}).get("status")
-    if prev_root == "linked" or (STATE_DIR / "root-linked").exists():
-        root_status = "linked"
+    if (STATE_DIR / "root-linked").exists():
+        # Cheap re-check: older links lack the themes symlink and report
+        # needs-link without trying to elevate.
+        root_status = try_sync_root()
     elif changed or prev_root not in ("synced", "needs-link", "needs-elevation", "skipped"):
         root_status = try_sync_root()
     else:
@@ -1139,6 +1423,12 @@ def main():
             "qt6": qt6,
             "qt5": qt5,
         },
+        "gtk_wrapper": {
+            "enabled": wrapper_mode,
+            "name": wrapper_name,
+            "status": wrapper_status,
+            "path": str(wrapper_path) if wrapper_path else None,
+        },
         "qt_platformtheme": qt_env,
         "gsettings": gsettings,
         "restarts": {"restarted": restarted, "pending": pending},
@@ -1149,9 +1439,12 @@ def main():
     bits = [
         f"chroma: {theme_name} ({p['mode']})",
         f"gtk4 {s4}",
-        f"gtk3 {s3}",
-        f"theme {gtk_theme}",
     ]
+    if wrapper_mode:
+        bits.append(f"gtk3 wrapper {wrapper_name} {wrapper_status}")
+    else:
+        bits.append(f"gtk3 {s3}")
+        bits.append(f"theme {gtk3_ini_theme}")
     if qt6.get("status") == "ok":
         bits.append(f"qt6 {qt6.get('colors')}/{qt6.get('conf')}")
     else:

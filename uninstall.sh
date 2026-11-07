@@ -164,6 +164,10 @@ root_teardown() {
   # Also chown-repair any user GTK dirs a bad prior link left as root, and
   # remove a root-owned root-linked marker the user cannot delete.
   root_cmd='for d in gtk-3.0 gtk-4.0 qt6ct qt5ct; do p=/root/.config/$d; [[ -L $p ]] && rm -f "$p"; done
+p=/root/.local/share/themes; [[ -L $p ]] && rm -f "$p"
+if [[ -d $p && ! -L $p ]]; then
+  for d in "$p"/*-chroma-a "$p"/*-chroma-b; do [[ -d $d ]] && rm -rf "$d"; done
+fi
 rm -f /etc/sudoers.d/chroma-sync-root
 marker='"$state"'/root-linked
 rm -f "$marker"

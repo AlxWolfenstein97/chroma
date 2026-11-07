@@ -321,10 +321,10 @@ fi
 # Optional — after apply so user GTK dirs already exist. Failure must not
 # abort GTK arming (arm-all continues either way).
 if (( with_root )); then
-  if [[ -f $state/root-linked ]]; then
+  if [[ -f $state/root-linked ]] && grep -q 'themes' "$state/root-linked"; then
     note "root already linked ($state/root-linked)"
   else
-    note "linking /root/.config GTK dirs to yours (password once — sudo on TTY)"
+    note "linking /root config + themes dirs to yours (password once — sudo on TTY)"
     link="$here/bin/chroma-link-root"
     if elevate "$link"; then
       note "root linked"

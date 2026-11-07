@@ -1,8 +1,12 @@
 #!/usr/bin/python3
-"""chroma-link-root — one-time: point /root/.config GTK/Qt dirs at the user's.
+"""chroma-link-root — one-time: point /root config dirs at the user's.
 
 After this, every Chroma theme apply to ~/.config is what root sees too
 (pkexec BleachBit, sudo bleachbit, etc.) with no per-switch elevation.
+
+Also links /root/.local/share/themes → the user's themes directory, because
+generated GTK3 wrapper themes live there and root GTK apps resolve theme names
+through $XDG_DATA_HOME/themes.
 
 Must run as root. Invoking user is taken from SUDO_USER / PKEXEC_UID.
 
@@ -94,6 +98,33 @@ def main() -> int:
         dest.symlink_to(src)
         linked.append(f"{name}=linked")
 
+    # Generated wrapper themes live under the user's data dir.
+    themes_src = home / ".local/share/themes"
+    themes_dest = Path("/root/.local/share/themes")
+    ensure_user_dir(home / ".local", uid, gid)
+    ensure_user_dir(home / ".local/share", uid, gid)
+    ensure_user_dir(themes_src, uid, gid)
+    themes_dest.parent.mkdir(parents=True, exist_ok=True)
+    if themes_dest.is_symlink() and themes_dest.resolve() == themes_src.resolve():
+        linked.append("themes=already")
+    else:
+        if themes_dest.exists() and not themes_dest.is_symlink():
+            backup = themes_dest.with_name(themes_dest.name + ".chroma-prelink")
+            if backup.exists():
+                stamp = time.strftime("%Y%m%d%H%M%S")
+                backup = themes_dest.with_name(
+                    f"{themes_dest.name}.chroma-prelink.{stamp}"
+                )
+            themes_dest.rename(backup)
+            print(
+                f"chroma-link-root: preserved {themes_dest} → {backup}",
+                file=sys.stderr,
+            )
+        if themes_dest.is_symlink() or themes_dest.exists():
+            themes_dest.unlink()
+        themes_dest.symlink_to(themes_src)
+        linked.append("themes=linked")
+
     # Marker the user session can see without reading /root — must be
     # user-writable so uninstall/wipe can clear it without elevation.
     state = home / ".local/state/omarchy/chroma"
@@ -102,8 +133,8 @@ def main() -> int:
     ensure_user_dir(state, uid, gid)
     marker = state / "root-linked"
     marker.write_text(
-        "symlinks /root/.config/{gtk-3.0,gtk-4.0,qt6ct,qt5ct} → "
-        f"{src_base}/…\n",
+        "symlinks /root/.config/{gtk-3.0,gtk-4.0,qt6ct,qt5ct} and "
+        f"/root/.local/share/themes → {home}/…\n",
         encoding="utf-8",
     )
     os.chown(marker, uid, gid)
