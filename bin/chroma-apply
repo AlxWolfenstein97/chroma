@@ -683,27 +683,191 @@ def current_font() -> str:
     return "Adwaita Sans 11"
 
 
-def write_settings_ini(path: Path, gtk_theme: str, mode: str, font: str) -> str:
+INI_MARKER = "# chroma:managed"
+INI_KEYS = ("gtk-theme-name", "gtk-application-prefer-dark-theme", "gtk-font-name")
+
+
+def _ini_section_bounds(lines: list[str], name: str = "Settings"):
+    start = None
+    end = len(lines)
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not (stripped.startswith("[") and stripped.endswith("]")):
+            continue
+        if start is None:
+            if stripped[1:-1].strip() == name:
+                start = i
+            continue
+        end = i
+        break
+    return start, end
+
+
+def _ini_managed_values(text: str) -> dict:
+    values = {key: None for key in INI_KEYS}
+    lines = text.splitlines()
+    start, end = _ini_section_bounds(lines)
+    if start is None:
+        return values
+    for line in lines[start + 1 : end]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", ";")):
+            continue
+        key, sep, value = stripped.partition("=")
+        key = key.strip()
+        if sep and key in values:
+            values[key] = value.strip()
+    return values
+
+
+def _merge_settings_ini(text: str, updates: dict) -> str:
+    """Update Chroma's keys in place, leaving every other line untouched."""
+    lines = text.splitlines()
+    start, end = _ini_section_bounds(lines)
+    if start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append("[Settings]")
+        lines.extend(f"{key}={value}" for key, value in updates.items())
+        return "\n".join(lines) + "\n"
+
+    seen = set()
+    for i in range(start + 1, end):
+        stripped = lines[i].strip()
+        if not stripped or stripped.startswith(("#", ";")):
+            continue
+        key, sep, _ = stripped.partition("=")
+        key = key.strip()
+        if sep and key in updates:
+            lines[i] = f"{key}={updates[key]}"
+            seen.add(key)
+    missing = [f"{key}={value}" for key, value in updates.items() if key not in seen]
+    if missing:
+        lines[end:end] = missing
+    return "\n".join(lines) + "\n"
+
+
+def _restore_settings_ini(text: str, original: dict) -> str:
+    """Drop Chroma's marker/keys, then put the user's original keys back."""
+    lines = [line for line in text.splitlines() if line.strip() != INI_MARKER]
+    start, end = _ini_section_bounds(lines)
+    if start is None:
+        restore = [
+            f"{key}={value}" for key, value in original.items() if value is not None
+        ]
+        if restore:
+            if lines and lines[-1].strip():
+                lines.append("")
+            lines.append("[Settings]")
+            lines.extend(restore)
+        return "\n".join(lines) + ("\n" if lines else "")
+
+    seen = set()
+    kept = []
+    for i, line in enumerate(lines):
+        if start < i < end:
+            stripped = line.strip()
+            key = ""
+            if stripped and not stripped.startswith(("#", ";")):
+                key = stripped.partition("=")[0].strip() if "=" in stripped else ""
+            if key in original:
+                value = original[key]
+                if value is None:
+                    continue
+                kept.append(f"{key}={value}")
+                seen.add(key)
+                continue
+        kept.append(line)
+
+    start, end = _ini_section_bounds(kept)
+    missing = [
+        f"{key}={value}"
+        for key, value in original.items()
+        if value is not None and key not in seen
+    ]
+    if missing and start is not None:
+        kept[end:end] = missing
+    return "\n".join(kept) + ("\n" if kept else "")
+
+
+def _ini_has_content(text: str) -> bool:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or (stripped.startswith("[") and stripped.endswith("]")):
+            continue
+        return True
+    return False
+
+
+def write_settings_ini(
+    path: Path,
+    gtk_theme: str,
+    mode: str,
+    font: str,
+    original=None,
+) -> tuple[str, dict]:
     # Deliberately omit icon/cursor keys — Omarchy's theme-set-gnome owns
     # those via gsettings / icons.theme. Writing them here made Chroma look
     # like an icon engine and could diverge from the live gsettings value.
-    prefer_dark = "1" if mode == "dark" else "0"
-    body = (
-        "[Settings]\n"
-        f"gtk-theme-name={gtk_theme}\n"
-        f"gtk-application-prefer-dark-theme={prefer_dark}\n"
-        f"gtk-font-name={font}\n"
-    )
-
-    marker = "# chroma:managed\n"
-    content = marker + body
+    #
+    # Merge into the existing file instead of replacing it: settings.ini is
+    # shared with the user and other Omarchy tooling, so unrelated keys such
+    # as gtk-enable-animations or gtk-decoration-layout must survive apply
+    # and revert. The pre-Chroma values/existence are kept in state.json for
+    # rollback, while later user edits outside Chroma's keys are left alone.
+    updates = {
+        "gtk-theme-name": gtk_theme,
+        "gtk-application-prefer-dark-theme": "1" if mode == "dark" else "0",
+        "gtk-font-name": font,
+    }
     existed = path.exists()
-    if existed:
-        prev = read_file(path)
-        if prev == content:
-            return "unchanged"
+    text = read_file(path) if existed else ""
+    if original is None:
+        legacy = any(line.strip() == INI_MARKER for line in text.splitlines())
+        if legacy:
+            # An older Chroma wrote this file without a key snapshot; treat
+            # its managed keys as ours rather than restoring stale Chroma
+            # values on revert.
+            original = {"existed": False, "keys": {key: None for key in INI_KEYS}}
+        else:
+            original = {
+                "existed": existed,
+                "keys": _ini_managed_values(text) if existed else {key: None for key in INI_KEYS},
+            }
+
+    content = _merge_settings_ini(text, updates)
+    if not any(line.strip() == INI_MARKER for line in content.splitlines()):
+        content = INI_MARKER + "\n" + content
+    if existed and content == text:
+        return "unchanged", original
     atomic_write(path, content)
-    return "updated" if existed else "created"
+    return ("updated" if existed else "created"), original
+
+
+def revert_settings_ini(path: Path, record) -> str:
+    if not path.exists():
+        return "absent"
+    text = read_file(path)
+    if INI_MARKER not in text:
+        return "untouched"
+    if isinstance(record, dict):
+        existed = bool(record.get("existed", False))
+        original = record.get("keys")
+        if not isinstance(original, dict):
+            original = {key: None for key in INI_KEYS}
+    else:
+        existed = False
+        original = {key: None for key in INI_KEYS}
+
+    content = _restore_settings_ini(text, original)
+    if not _ini_has_content(content):
+        if existed:
+            atomic_write(path, content)
+            return "restored"
+        path.unlink()
+        return "removed"
+    atomic_write(path, content)
+    return "restored"
 
 
 def qt_argb(hex_color: str, alpha: str = "ff") -> str:
@@ -1234,9 +1398,9 @@ def do_revert() -> int:
 
     r4 = revert_file(GTK4_CSS)
     r3 = revert_file(GTK3_CSS)
-    for ini in (GTK4_INI, GTK3_INI):
-        if ini.exists() and "# chroma:managed" in read_file(ini):
-            ini.unlink()
+    ini_records = state.get("settings_ini") or {}
+    ini4 = revert_settings_ini(GTK4_INI, ini_records.get(str(GTK4_INI)))
+    ini3 = revert_settings_ini(GTK3_INI, ini_records.get(str(GTK3_INI)))
     push_qt_env(enabled=False)
 
     # Restore the real theme before deleting the wrapper it points at: if the
@@ -1259,6 +1423,7 @@ def do_revert() -> int:
     gs = ", ".join(restored) if restored else "nothing to restore"
     print(
         f"chroma: reverted (gtk4: {r4}, gtk3: {r3}, "
+        f"settings.ini: gtk4 {ini4}/gtk3 {ini3}, "
         f"wrappers: {removed}, gsettings: {gs})"
     )
     return 0
@@ -1350,8 +1515,13 @@ def main():
         )
         gtk3_ini_theme = gtk_theme
         gtk4_ini_theme = gtk_theme
-    i4 = write_settings_ini(GTK4_INI, gtk4_ini_theme, p["mode"], font)
-    i3 = write_settings_ini(GTK3_INI, gtk3_ini_theme, p["mode"], font)
+    prev_ini = (prev or {}).get("settings_ini") or {}
+    i4, ini4 = write_settings_ini(
+        GTK4_INI, gtk4_ini_theme, p["mode"], font, prev_ini.get(str(GTK4_INI))
+    )
+    i3, ini3 = write_settings_ini(
+        GTK3_INI, gtk3_ini_theme, p["mode"], font, prev_ini.get(str(GTK3_INI))
+    )
 
     # Optional qt*ct color files if those tools exist — never flip platform theme.
     qt6 = write_qtct(QT6_DIR, p, "qt6ct") if shutil.which("qt6ct") else {"status": "skipped", "reason": "unused"}
@@ -1466,6 +1636,10 @@ def main():
             "gtk3_ini": {"path": str(GTK3_INI), "status": i3},
             "qt6": qt6,
             "qt5": qt5,
+        },
+        "settings_ini": {
+            str(GTK4_INI): ini4,
+            str(GTK3_INI): ini3,
         },
         "gtk_wrapper": {
             "enabled": wrapper_mode,

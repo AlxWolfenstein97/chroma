@@ -236,7 +236,11 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
   built from `adw-gtk3*` (or Adwaita) with the Chroma block appended. The next
   palette change rewrites the inactive copy, so two directories alternate.
 - `~/.config/gtk-{3,4}.0/settings.ini` — theme name, prefer-dark, font
-  (no icon / cursor keys — Omarchy owns those).
+  (no icon / cursor keys — Omarchy owns those). Chroma merges its three keys
+  into the existing file, so unrelated settings such as
+  `gtk-enable-animations` or `gtk-decoration-layout` survive; revert removes
+  Chroma's marker/keys, restores their pre-Chroma values (or absence), and
+  keeps later user edits.
 - Two gsettings keys: `color-scheme`, `gtk-theme` (originals saved for revert).
 - `~/.local/state/omarchy/chroma/state.json` — last apply metadata.
 

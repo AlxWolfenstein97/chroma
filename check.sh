@@ -48,6 +48,19 @@ export CHROMA_QT6_DIR="$tmp/qt6"
 export CHROMA_QT5_DIR="$tmp/qt5"
 export CHROMA_QT_ENV_FILE="$tmp/environment.d/99-chroma-qt.conf"
 
+# settings.ini is shared with the user and other Omarchy tooling. Seed
+# unrelated keys plus the pre-Chroma values of the keys Chroma owns so the
+# merge/rollback path is exercised instead of a file-replacement path.
+for d in gtk4 gtk3; do
+  cat >"$tmp/$d/settings.ini" <<'EOF'
+[Settings]
+gtk-enable-animations=false
+gtk-decoration-layout=menu:close
+gtk-theme-name=Adwaita
+gtk-font-name=Original 10
+EOF
+done
+
 # A window-manager snapshot plus a fake /proc lets the libhandy hint be tested
 # hermetically: only processes whose maps mention libhandy are reported.
 mkdir -p "$tmp/proc/9001" "$tmp/proc/9002"
@@ -72,6 +85,20 @@ if out=$("$here/bin/chroma-apply" --no-restart --no-root); then
 else
   bad "apply dark fixture"
 fi
+
+# Apply merges Chroma's keys into settings.ini instead of replacing the file.
+for d in gtk4 gtk3; do
+  ini="$tmp/$d/settings.ini"
+  grep -q '^gtk-enable-animations=false$' "$ini" \
+    && pass "$d settings.ini keeps gtk-enable-animations" \
+    || bad "$d settings.ini lost gtk-enable-animations"
+  grep -q '^gtk-decoration-layout=menu:close$' "$ini" \
+    && pass "$d settings.ini keeps gtk-decoration-layout" \
+    || bad "$d settings.ini lost gtk-decoration-layout"
+  grep -q '^# chroma:managed$' "$ini" \
+    && pass "$d settings.ini carries marker" \
+    || bad "$d settings.ini missing marker"
+done
 
 # A switch to dark pins open libhandy windows to stock Adwaita; name them so
 # the user knows what to relaunch. Non-libhandy windows must stay quiet.
@@ -171,8 +198,36 @@ sed -i 's/mode = "light"/mode = "dark"/' "$tmp/theme/colors.toml"
 
 # Revert restores the base theme before deleting generated wrappers.
 # It must also respect environment.d ownership.
+# A key the user adds to the marked file after apply must survive both the
+# next apply and the revert, while Chroma's keys roll back to their originals.
+printf 'gtk-show-unicode-menu=false\n' >>"$tmp/gtk4/settings.ini"
+"$here/bin/chroma-apply" --no-restart --no-root >/dev/null
+grep -q '^gtk-show-unicode-menu=false$' "$tmp/gtk4/settings.ini" \
+  && pass "re-apply keeps later user setting" \
+  || bad "re-apply dropped later user setting"
 printf 'QT_QPA_PLATFORMTHEME=qt5ct\n' >"$CHROMA_QT_ENV_FILE"
 "$here/bin/chroma-apply" --revert >/dev/null
+[[ -f $tmp/gtk4/settings.ini ]] && grep -q '^gtk-enable-animations=false$' "$tmp/gtk4/settings.ini" \
+  && pass "revert restores original gtk4 settings" \
+  || bad "revert lost original gtk4 settings"
+grep -q '^gtk-decoration-layout=menu:close$' "$tmp/gtk4/settings.ini" \
+  && pass "revert keeps unrelated gtk4 setting" \
+  || bad "revert dropped unrelated gtk4 setting"
+grep -q '^gtk-show-unicode-menu=false$' "$tmp/gtk4/settings.ini" \
+  && pass "revert keeps later user setting" \
+  || bad "revert dropped later user setting"
+grep -q '^gtk-theme-name=Adwaita$' "$tmp/gtk4/settings.ini" \
+  && pass "revert restores original gtk theme" \
+  || bad "revert did not restore original gtk theme"
+grep -q '^gtk-font-name=Original 10$' "$tmp/gtk4/settings.ini" \
+  && pass "revert restores original gtk font" \
+  || bad "revert did not restore original gtk font"
+grep -q '^gtk-application-prefer-dark-theme=' "$tmp/gtk4/settings.ini" \
+  && bad "revert left Chroma-only prefer-dark key" \
+  || pass "revert removes Chroma-only prefer-dark key"
+grep -q '^# chroma:managed$' "$tmp/gtk4/settings.ini" \
+  && bad "revert left settings.ini marker" \
+  || pass "revert removes settings.ini marker"
 [[ -f $CHROMA_QT_ENV_FILE ]] && grep -q 'qt5ct' "$CHROMA_QT_ENV_FILE" \
   && pass "revert keeps unowned environment.d file" \
   || bad "revert deleted an unowned environment.d file"
