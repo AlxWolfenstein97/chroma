@@ -221,8 +221,8 @@ mockups; that is a separate dep family.
 5. Windowless GTK daemons (`--gapplication-service`) are restarted when they
    have no open window, so open apps are never killed mid-use. In wrapper mode
    the GTK portal is *not* bounced — it live-updates, and killing it would
-   close an open file chooser. The legacy `--no-gtk-wrapper` mode keeps the
-   old portal restart.
+   close an open file chooser. The `--no-gtk-wrapper` escape hatch keeps the
+   portal restart.
 
 Idempotent: unchanged themes write nothing (byte-compared before write).
 
@@ -240,7 +240,10 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
   into the existing file, so unrelated settings such as
   `gtk-enable-animations` or `gtk-decoration-layout` survive; revert removes
   Chroma's marker/keys, restores their pre-Chroma values (or absence), and
-  keeps later user edits.
+  keeps later user edits. The original values/existence are persisted to
+  `state.json` before the first INI write, so an interrupted first apply still
+  rolls back correctly; if that snapshot cannot be saved, the INIs are left
+  untouched.
 - Two gsettings keys: `color-scheme`, `gtk-theme` (originals saved for revert).
 - `~/.local/state/omarchy/chroma/state.json` — last apply metadata.
 
@@ -252,13 +255,11 @@ Idempotent: unchanged themes write nothing (byte-compared before write).
   password lands in the same terminal; `pkexec` is only the non-TTY fallback.
 - Apply runs **before** the root link so user GTK dirs exist before
   `/root/.config` points at them.
-- Users who linked before wrapper themes existed need one re-run:
-  `./install.sh --with-root` (it notices the missing themes link).
 
 **Escape hatch**
 
 - `--no-gtk-wrapper` (one run) or `CHROMA_NO_GTK_WRAPPER=1` (persistent —
-  export it before the theme-set hook runs) writes the old user CSS in
+  export it before the theme-set hook runs) writes user CSS in
   `~/.config/gtk-3.0/gtk.css` instead. That path is restart-only for GTK3 and
   Qt; nothing else changes.
 
@@ -319,8 +320,8 @@ documented below; we never kill a window that is in use to force a repaint.
   triggered by Omarchy's ordering, not by wrapper rotation. Chroma names the
   affected windows (`relaunch Disks (libhandy pinned to Adwaita)`), the
   theme-set hook echoes that line, and the full run stays in
-  `~/.local/state/omarchy/chroma/last-run`. The legacy
-  `--no-gtk-wrapper` mode does not avoid the pin, but it leaves Chroma's palette
+  `~/.local/state/omarchy/chroma/last-run`. `--no-gtk-wrapper` does not avoid
+  the pin, but it leaves Chroma's palette
   in `~/.config/gtk-3.0/gtk.css`, already loaded by the process, so the window
   keeps its previous palette instead of dropping to Adwaita — at the cost of
   losing live GTK3 and Qt updates for every app. That is why the wrapper stays

@@ -279,6 +279,125 @@ grep -q 'fixture failed' "$failstate/omarchy/chroma/last-hook-error" 2>/dev/null
   && pass "hook records failure in last-hook-error" \
   || bad "hook records failure in last-hook-error"
 
+# Failure paths: the pre-Chroma INI snapshot must reach state.json before the
+# first settings.ini is replaced, and a snapshot that cannot be persisted must
+# leave both INIs untouched. Cover both immediate revert and a later retry.
+make_ini_fixture() {
+  local f
+  f=$(mktemp -d)
+  mkdir -p "$f/theme" "$f/gtk4css" "$f/gtk3css" "$f/gtk4ini" "$f/gtk3ini" \
+    "$f/state" "$f/stage" "$f/themes"
+  cp "$tmp/theme/colors.toml" "$f/theme/colors.toml"
+  for d in gtk4ini gtk3ini; do
+    cat >"$f/$d/settings.ini" <<'EOF'
+[Settings]
+gtk-enable-animations=false
+gtk-theme-name=Original
+gtk-font-name=Original 10
+EOF
+  done
+  printf '%s\n' "$f"
+}
+
+apply_ini_fixture() {
+  local f=$1
+  shift
+  CHROMA_THEME_DIR="$f/theme" \
+  CHROMA_GTK4_CSS="$f/gtk4css/gtk.css" \
+  CHROMA_GTK3_CSS="$f/gtk3css/gtk.css" \
+  CHROMA_GTK4_INI="$f/gtk4ini/settings.ini" \
+  CHROMA_GTK3_INI="$f/gtk3ini/settings.ini" \
+  CHROMA_STATE_DIR="$f/state" \
+  CHROMA_ROOT_STAGE="$f/stage" \
+  CHROMA_THEMES_DIR="$f/themes" \
+  CHROMA_QT6_DIR="$f/qt6" \
+  CHROMA_QT5_DIR="$f/qt5" \
+  CHROMA_QT_ENV_FILE="$f/environment.d/99-chroma-qt.conf" \
+  "$here/bin/chroma-apply" --no-restart --no-root "$@"
+}
+
+for mode in revert retry absent; do
+  f=$(make_ini_fixture)
+  if [[ $mode == absent ]]; then
+    rm -f "$f/gtk4ini/settings.ini" "$f/gtk3ini/settings.ini"
+  fi
+  chmod 0555 "$f/gtk3ini"
+  if apply_ini_fixture "$f" >/dev/null 2>&1; then
+    bad "INI failure-path ($mode): apply unexpectedly succeeded"
+  else
+    pass "INI failure-path ($mode): apply fails after gtk4 INI write"
+  fi
+  if python3 - "$f/state/state.json" "$mode" "$f/gtk4ini/settings.ini" "$f/gtk3ini/settings.ini" <<'PY'
+import json, sys
+state = json.load(open(sys.argv[1]))
+expect = sys.argv[2] != "absent"
+for path in sys.argv[3:]:
+    rec = state["settings_ini"][path]
+    assert rec["existed"] is expect, path
+    if expect:
+        assert rec["keys"]["gtk-theme-name"] == "Original", path
+        assert rec["keys"]["gtk-font-name"] == "Original 10", path
+    else:
+        assert all(value is None for value in rec["keys"].values()), path
+PY
+  then
+    pass "INI failure-path ($mode): snapshot persisted before first write"
+  else
+    bad "INI failure-path ($mode): snapshot missing/incomplete"
+  fi
+  chmod 0755 "$f/gtk3ini"
+  if [[ $mode == retry ]]; then
+    if apply_ini_fixture "$f" >/dev/null 2>&1; then
+      pass "INI failure-path ($mode): retry applies"
+    else
+      bad "INI failure-path ($mode): retry failed"
+    fi
+  fi
+  apply_ini_fixture "$f" --revert >/dev/null 2>&1 || true
+  for d in gtk4ini gtk3ini; do
+    ini="$f/$d/settings.ini"
+    if [[ $mode == absent ]]; then
+      [[ ! -e $ini ]] \
+        && pass "INI failure-path ($mode): $d stays absent" \
+        || bad "INI failure-path ($mode): $d was left behind"
+      continue
+    fi
+    grep -q '^gtk-theme-name=Original$' "$ini" \
+      && pass "INI failure-path ($mode): $d original theme restored" \
+      || bad "INI failure-path ($mode): $d original theme not restored"
+    grep -q '^gtk-font-name=Original 10$' "$ini" \
+      && pass "INI failure-path ($mode): $d original font restored" \
+      || bad "INI failure-path ($mode): $d original font not restored"
+    grep -q '^gtk-enable-animations=false$' "$ini" \
+      && pass "INI failure-path ($mode): $d unrelated key kept" \
+      || bad "INI failure-path ($mode): $d unrelated key lost"
+    grep -q '^# chroma:managed$' "$ini" \
+      && bad "INI failure-path ($mode): $d marker left" \
+      || pass "INI failure-path ($mode): $d marker removed"
+  done
+  rm -rf "$f"
+done
+
+# A snapshot that cannot be written must not be followed by an INI replacement.
+f=$(make_ini_fixture)
+chmod 0555 "$f/state"
+if apply_ini_fixture "$f" >/dev/null 2>&1; then
+  pass "INI snapshot failure: apply continues"
+else
+  bad "INI snapshot failure: apply aborted"
+fi
+chmod 0755 "$f/state"
+for d in gtk4ini gtk3ini; do
+  ini="$f/$d/settings.ini"
+  grep -q '^# chroma:managed$' "$ini" \
+    && bad "INI snapshot failure: $d was modified" \
+    || pass "INI snapshot failure: $d left unchanged"
+  grep -q '^gtk-theme-name=Original$' "$ini" \
+    && pass "INI snapshot failure: $d original theme kept" \
+    || bad "INI snapshot failure: $d original theme lost"
+done
+rm -rf "$f"
+
 # Validate manifest against omarchy if available
 if command -v omarchy >/dev/null 2>&1; then
   if omarchy plugin validate "$here" >/dev/null 2>&1; then

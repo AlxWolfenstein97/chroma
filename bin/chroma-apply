@@ -870,6 +870,54 @@ def revert_settings_ini(path: Path, record) -> str:
     return "restored"
 
 
+def snapshot_settings_ini(paths, prev) -> tuple[dict, bool]:
+    """Persist pre-Chroma INI keys before any protected file is replaced.
+
+    The snapshot must land in state.json before the first settings.ini write:
+    a failed or interrupted first apply otherwise leaves a marked INI whose
+    original values were never recorded. Existing records are retained across
+    retries so a later run cannot overwrite the real originals with Chroma's
+    values. Returns (records, persisted); when persisted is False the caller
+    must leave the INIs untouched.
+    """
+    # Re-read state so an earlier gsettings snapshot written during this run is
+    # not lost when the INI records are persisted.
+    current = load_state()
+    if not isinstance(current, dict):
+        current = {}
+    base = current or (prev if isinstance(prev, dict) else {})
+    records = dict(base.get("settings_ini") or {})
+    for key, value in ((prev or {}).get("settings_ini") or {}).items():
+        records.setdefault(key, value)
+
+    changed = False
+    for path in paths:
+        key = str(path)
+        if isinstance(records.get(key), dict):
+            continue
+        existed = path.exists()
+        text = read_file(path) if existed else ""
+        legacy = any(line.strip() == INI_MARKER for line in text.splitlines())
+        if legacy:
+            records[key] = {"existed": False, "keys": {k: None for k in INI_KEYS}}
+        else:
+            records[key] = {
+                "existed": existed,
+                "keys": (
+                    _ini_managed_values(text)
+                    if existed
+                    else {k: None for k in INI_KEYS}
+                ),
+            }
+        changed = True
+
+    if not changed:
+        return records, True
+    early = dict(base) if base else {"schemaVersion": 1}
+    early["settings_ini"] = records
+    return records, save_state(early)
+
+
 def qt_argb(hex_color: str, alpha: str = "ff") -> str:
     return f"#{alpha}{hex_color[1:]}"
 
@@ -1515,13 +1563,35 @@ def main():
         )
         gtk3_ini_theme = gtk_theme
         gtk4_ini_theme = gtk_theme
-    prev_ini = (prev or {}).get("settings_ini") or {}
-    i4, ini4 = write_settings_ini(
-        GTK4_INI, gtk4_ini_theme, p["mode"], font, prev_ini.get(str(GTK4_INI))
+    ini_records, ini_snapshot_ok = snapshot_settings_ini(
+        (GTK4_INI, GTK3_INI), prev
     )
-    i3, ini3 = write_settings_ini(
-        GTK3_INI, gtk3_ini_theme, p["mode"], font, prev_ini.get(str(GTK3_INI))
-    )
+    if ini_snapshot_ok:
+        i4, ini4 = write_settings_ini(
+            GTK4_INI,
+            gtk4_ini_theme,
+            p["mode"],
+            font,
+            ini_records.get(str(GTK4_INI)),
+        )
+        i3, ini3 = write_settings_ini(
+            GTK3_INI,
+            gtk3_ini_theme,
+            p["mode"],
+            font,
+            ini_records.get(str(GTK3_INI)),
+        )
+    else:
+        # Without a durable rollback snapshot, writing the INIs would leave
+        # values we cannot restore. Skip them and let the rest of apply run.
+        print(
+            "chroma: cannot persist settings.ini rollback snapshot; "
+            "leaving GTK settings.ini unchanged",
+            file=sys.stderr,
+        )
+        i4 = i3 = "skipped"
+        ini4 = ini_records.get(str(GTK4_INI))
+        ini3 = ini_records.get(str(GTK3_INI))
 
     # Optional qt*ct color files if those tools exist — never flip platform theme.
     qt6 = write_qtct(QT6_DIR, p, "qt6ct") if shutil.which("qt6ct") else {"status": "skipped", "reason": "unused"}
