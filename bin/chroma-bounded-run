@@ -1,0 +1,131 @@
+#!/bin/bash
+#
+# Bounded execution helper used by the recurring theme-set hook.
+#
+# A hook runs on every theme switch, so a stalled helper or one that logs
+# without limit must not hang or grow the caller. Run the command in its own
+# session, enforce an absolute deadline, clean up every owned descendant even
+# when the leader exits first, and keep only the final bytes of combined
+# output. The caller still receives the command's exit status; expiry is 124.
+#
+# Usage:
+#   chroma-bounded-run [--timeout SECS] [--max-bytes N] [--label NAME]
+#                      [--output FILE] -- COMMAND [ARGS...]
+#
+# Without --output the bounded output goes to stdout; with it, to FILE. The
+# timeout notice is appended to the same destination so it survives the cap.
+set -u
+
+timeout=120
+max_bytes=65536
+label="chroma"
+outfile=""
+
+while (( $# )); do
+  case $1 in
+    --timeout) timeout=${2:-}; shift 2 ;;
+    --max-bytes) max_bytes=${2:-}; shift 2 ;;
+    --label) label=${2:-}; shift 2 ;;
+    --output) outfile=${2:-}; shift 2 ;;
+    --) shift; break ;;
+    *) break ;;
+  esac
+done
+
+case $timeout in ''|*[!0-9]*) timeout=120 ;; esac
+(( timeout > 0 )) || timeout=120
+case $max_bytes in ''|*[!0-9]*) max_bytes=65536 ;; esac
+(( max_bytes > 0 )) || max_bytes=65536
+
+(( $# )) || exit 2
+
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/chroma-run.XXXXXX")" || exit 1
+child=""
+tail_pid=""
+timed_out=0
+
+stop_child() {
+  [[ -n $child ]] || return 0
+  # Signal the whole group even if the leader is already gone: descendants can
+  # outlive it while still sharing its PGID.
+  if kill -TERM -- "-$child" 2>/dev/null; then
+    for _ in 1 2 3 4 5; do
+      kill -0 -- "-$child" 2>/dev/null || break
+      sleep 0.2
+    done
+    kill -KILL -- "-$child" 2>/dev/null || true
+    for _ in 1 2 3 4 5; do
+      kill -0 -- "-$child" 2>/dev/null || break
+      sleep 0.1
+    done
+  fi
+  wait "$child" 2>/dev/null || true
+}
+
+cleanup() {
+  local rc=$?
+  trap - EXIT INT TERM HUP
+  stop_child
+  if [[ -n $tail_pid ]]; then
+    kill "$tail_pid" 2>/dev/null || true
+    wait "$tail_pid" 2>/dev/null || true
+  fi
+  rm -rf "$tmp"
+  exit "$rc"
+}
+trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
+
+# tail bounds the result in memory and on disk: a noisy command only ever
+# contributes its final bytes.
+mkfifo "$tmp/out" || exit 1
+tail -c "$max_bytes" <"$tmp/out" >"$tmp/bounded" &
+tail_pid=$!
+
+setsid "$@" >"$tmp/out" 2>&1 &
+child=$!
+
+status=0
+deadline=$((SECONDS + timeout))
+while kill -0 "$child" 2>/dev/null; do
+  if (( SECONDS >= deadline )); then
+    stop_child
+    status=124
+    timed_out=1
+    break
+  fi
+  sleep 0.2
+done
+
+if (( status == 0 )); then
+  wait "$child"
+  status=$?
+fi
+
+# Clear descendants left behind by a leader that already exited before
+# draining the filter, so the FIFO closes promptly.
+stop_child
+
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  kill -0 "$tail_pid" 2>/dev/null || break
+  sleep 0.2
+done
+kill "$tail_pid" 2>/dev/null || true
+wait "$tail_pid" 2>/dev/null || true
+
+if [[ -n $outfile ]]; then
+  cp "$tmp/bounded" "$outfile" 2>/dev/null || true
+  if (( timed_out )); then
+    printf 'chroma: %s exceeded %ss; stopped\n' "$label" "$timeout" \
+      >>"$outfile" 2>/dev/null || true
+  fi
+else
+  cat "$tmp/bounded"
+  if (( timed_out )); then
+    printf 'chroma: %s exceeded %ss; stopped\n' "$label" "$timeout"
+  fi
+fi
+
+exit "$status"

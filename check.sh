@@ -10,6 +10,7 @@ bad()  { printf 'FAIL %s\n' "$1"; fail=1; }
 [[ -x $here/bin/chroma-apply ]] || bad "chroma-apply not executable"
 [[ -x $here/bin/chroma-sync-root ]] || bad "chroma-sync-root not executable"
 [[ -x $here/bin/chroma-boot-install ]] || bad "chroma-boot-install not executable"
+[[ -x $here/bin/chroma-bounded-run ]] || bad "chroma-bounded-run not executable"
 [[ -f $here/manifest.json ]] || bad "manifest.json missing"
 
 # Hermetic apply against a temp theme.
@@ -251,6 +252,7 @@ shopt -u nullglob
 hookplugin="$tmp/hookplugin"
 hookstate="$tmp/hookstate"
 mkdir -p "$hookplugin/bin"
+cp "$here/bin/chroma-bounded-run" "$hookplugin/bin/"
 cat >"$hookplugin/bin/chroma-apply" <<'PY'
 print("chroma: Fixture (dark), relaunch Disks (libhandy pinned to Adwaita)")
 PY
@@ -270,6 +272,7 @@ grep -q 'relaunch Disks' "$hookstate/omarchy/chroma/last-run" 2>/dev/null \
 failplugin="$tmp/failplugin"
 failstate="$tmp/failstate"
 mkdir -p "$failplugin/bin"
+cp "$here/bin/chroma-bounded-run" "$failplugin/bin/"
 printf 'import sys\nprint("chroma: fixture failed")\nsys.exit(1)\n' \
   >"$failplugin/bin/chroma-apply"
 fail_err=$(CHROMA_PLUGIN_DIR="$failplugin" XDG_STATE_HOME="$failstate" \
@@ -279,6 +282,100 @@ fail_err=$(CHROMA_PLUGIN_DIR="$failplugin" XDG_STATE_HOME="$failstate" \
 grep -q 'fixture failed' "$failstate/omarchy/chroma/last-hook-error" 2>/dev/null \
   && pass "hook records failure in last-hook-error" \
   || bad "hook records failure in last-hook-error"
+
+# The recurring hook path must bound the apply invocation itself, not just the
+# startup installer. A noisy helper is capped producer-side, a stalled helper
+# hits the deadline and is cleaned up, and cancelling the hook takes its
+# apply process group with it.
+noisyplugin="$tmp/noisyplugin"
+noisystate="$tmp/noisystate"
+mkdir -p "$noisyplugin/bin"
+cp "$here/bin/chroma-bounded-run" "$noisyplugin/bin/"
+cat >"$noisyplugin/bin/chroma-apply" <<'PY'
+import sys
+sys.stdout.write("x" * 100000 + "\n")
+print("chroma: final hook line")
+PY
+CHROMA_PLUGIN_DIR="$noisyplugin" XDG_STATE_HOME="$noisystate" \
+  CHROMA_HOOK_MAX_BYTES=400 bash "$here/omarchy/theme-set-hook" \
+  >/dev/null 2>/dev/null
+noisy_size=$(wc -c <"$noisystate/omarchy/chroma/last-run" 2>/dev/null || echo 0)
+(( noisy_size <= 410 )) \
+  && pass "hook caps noisy output (${noisy_size} bytes)" \
+  || bad "hook kept unbounded output (${noisy_size} bytes)"
+grep -q 'final hook line' "$noisystate/omarchy/chroma/last-run" 2>/dev/null \
+  && pass "hook cap keeps the final line" \
+  || bad "hook cap lost the final line"
+
+stallplugin="$tmp/stallplugin"
+stallstate="$tmp/stallstate"
+mkdir -p "$stallplugin/bin"
+cp "$here/bin/chroma-bounded-run" "$stallplugin/bin/"
+cat >"$stallplugin/bin/chroma-apply" <<'PY'
+import os, subprocess, sys
+p = subprocess.Popen(["sleep", "30"])
+with open(os.environ["STALL_PID"], "w") as f:
+    f.write(str(p.pid))
+sys.stdout.flush()
+p.wait()
+PY
+start=$SECONDS
+CHROMA_PLUGIN_DIR="$stallplugin" XDG_STATE_HOME="$stallstate" \
+  CHROMA_HOOK_TIMEOUT=1 STALL_PID="$stallstate/pid" \
+  bash "$here/omarchy/theme-set-hook" >/dev/null 2>/dev/null
+hook_rc=$?
+elapsed=$((SECONDS - start))
+[[ $hook_rc == 0 ]] \
+  && pass "hook stays non-fatal after a stall" \
+  || bad "hook returned $hook_rc after a stall"
+(( elapsed <= 10 )) \
+  && pass "hook deadline enforced (${elapsed}s)" \
+  || bad "hook deadline overrun (${elapsed}s)"
+grep -q 'exceeded 1s' "$stallstate/omarchy/chroma/last-hook-error" 2>/dev/null \
+  && pass "hook records the timeout in last-hook-error" \
+  || bad "hook did not record the timeout"
+stalled=$(cat "$stallstate/pid" 2>/dev/null || true)
+if [[ -n $stalled ]] && kill -0 "$stalled" 2>/dev/null; then
+  bad "hook left stalled descendant $stalled"
+else
+  pass "hook cleans up stalled descendants"
+fi
+
+cancelplugin="$tmp/cancelplugin"
+cancelstate="$tmp/cancelstate"
+mkdir -p "$cancelplugin/bin"
+cp "$here/bin/chroma-bounded-run" "$cancelplugin/bin/"
+cat >"$cancelplugin/bin/chroma-apply" <<'PY'
+import os, subprocess
+p = subprocess.Popen(["sleep", "30"])
+with open(os.environ["APPLY_PID"], "w") as f:
+    f.write(str(os.getpid()))
+with open(os.environ["STALL_PID"], "w") as f:
+    f.write(str(p.pid))
+p.wait()
+PY
+CHROMA_PLUGIN_DIR="$cancelplugin" XDG_STATE_HOME="$cancelstate" \
+  APPLY_PID="$cancelstate/apply.pid" STALL_PID="$cancelstate/pid" \
+  bash "$here/omarchy/theme-set-hook" >/dev/null 2>/dev/null &
+hookpid=$!
+for _ in $(seq 1 50); do
+  if [[ -s $cancelstate/apply.pid && -s $cancelstate/pid ]]; then
+    break
+  fi
+  sleep 0.1
+done
+kill -TERM "$hookpid" 2>/dev/null || true
+wait "$hookpid" 2>/dev/null || true
+sleep 0.3
+for name in apply pid; do
+  pid=$(cat "$cancelstate/$name.pid" 2>/dev/null || true)
+  if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
+    bad "hook: $name survived cancellation"
+  else
+    pass "hook: $name cleaned up on cancellation"
+  fi
+done
+
 
 # Failure paths: the pre-Chroma INI snapshot must reach state.json before the
 # first settings.ini is replaced, and a snapshot that cannot be persisted must

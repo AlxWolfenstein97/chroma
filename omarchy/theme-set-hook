@@ -6,23 +6,58 @@ set -uo pipefail
 
 PLUGIN="${CHROMA_PLUGIN_DIR:-$HOME/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma}"
 APPLY="$PLUGIN/bin/chroma-apply"
+RUNNER="$PLUGIN/bin/chroma-bounded-run"
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/chroma"
 ERR="$STATE/last-hook-error"
 RUN="$STATE/last-run"
+TIMEOUT="${CHROMA_HOOK_TIMEOUT:-120}"
+MAX_BYTES="${CHROMA_HOOK_MAX_BYTES:-65536}"
 
 mkdir -p "$STATE" 2>/dev/null || true
 rm -f "$ERR" 2>/dev/null || true
 
 [[ -f $APPLY ]] || exit 0
+[[ -f $RUNNER ]] || exit 0
+
+# The hook runs on every switch, so the apply invocation gets the same whole-
+# operation bounds as the startup installer: absolute deadline, process-group
+# cleanup on expiry or cancellation, and producer-side output cap. The runner
+# writes into a temp file so this shell can forward TERM/INT/HUP to it.
+outfile=$(mktemp "${TMPDIR:-/tmp}/chroma-hook.XXXXXX" 2>/dev/null) || exit 0
+runner=""
+
+cleanup() {
+  local rc=$?
+  trap - EXIT INT TERM HUP
+  if [[ -n $runner ]]; then
+    kill -TERM "$runner" 2>/dev/null || true
+    wait "$runner" 2>/dev/null || true
+  fi
+  rm -f "$outfile" 2>/dev/null || true
+  exit "$rc"
+}
+trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
 
 # python3 avoids a lost +x bit silently skipping theming after plugin update.
 if command -v python3 >/dev/null 2>&1; then
-  out=$(python3 "$APPLY" --no-restart 2>&1)
+  bash "$RUNNER" --timeout "$TIMEOUT" --max-bytes "$MAX_BYTES" \
+    --label "theme-set hook" --output "$outfile" \
+    -- python3 "$APPLY" --no-restart &
 else
   [[ -x $APPLY ]] || exit 0
-  out=$("$APPLY" --no-restart 2>&1)
+  bash "$RUNNER" --timeout "$TIMEOUT" --max-bytes "$MAX_BYTES" \
+    --label "theme-set hook" --output "$outfile" \
+    -- "$APPLY" --no-restart &
 fi
+runner=$!
+wait "$runner"
 status=$?
+runner=""
+
+out=$(cat "$outfile" 2>/dev/null || true)
 
 printf '%s\n' "$out" >"$RUN" 2>/dev/null || true
 
@@ -32,7 +67,7 @@ if ((status != 0)); then
 fi
 
 # A dark switch pins open libhandy windows to stock Adwaita. Surface the one
-# line the user can act on; the full run stays in last-run.
+# line the user can act on; the full (bounded) run stays in last-run.
 if [[ $out == *"relaunch "* ]]; then
   printf 'chroma: relaunch %s\n' "${out##*relaunch }" >&2
 fi

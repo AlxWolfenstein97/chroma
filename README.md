@@ -325,7 +325,9 @@ documented below; we never kill a window that is in use to force a repaint.
   triggered by Omarchy's ordering, not by wrapper rotation. Chroma names the
   affected windows (`relaunch Disks (libhandy pinned to Adwaita)`), the
   theme-set hook echoes that line, and the full run stays in
-  `~/.local/state/omarchy/chroma/last-run`. `--no-gtk-wrapper` does not avoid
+  `~/.local/state/omarchy/chroma/last-run`. The hook bounds that apply run
+  with a deadline, owned-descendant cleanup and a 64 KiB tail, so a stalled or
+  noisy helper cannot hold up the theme switch. `--no-gtk-wrapper` does not avoid
   the pin, but it leaves Chroma's palette
   in `~/.config/gtk-3.0/gtk.css`, already loaded by the process, so the window
   keeps its previous palette instead of dropping to Adwaita — at the cost of
