@@ -1,0 +1,97 @@
+#!/bin/bash
+#
+# One-shot startup installer used by Service.qml.
+#
+# install.sh --quiet normally finishes in seconds, but lock acquisition or a
+# child command can stall. Give the whole operation an absolute deadline, run
+# it in its own session so expiry or cancellation can signal every descendant,
+# reap what is left, and cap captured stderr to the last 400 bytes so
+# Quickshell's StdioCollector cannot buffer an unbounded log.
+set -u
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(cd "$here/.." && pwd)"
+timeout="${CHROMA_BOOT_TIMEOUT:-120}"
+case $timeout in
+  ''|*[!0-9]*) timeout=120 ;;
+esac
+(( timeout > 0 )) || timeout=120
+
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/chroma-boot.XXXXXX")" || exit 1
+child=""
+tail_pid=""
+timed_out=0
+
+stop_child() {
+  [[ -n $child ]] || return 0
+  if ! kill -0 "$child" 2>/dev/null; then
+    wait "$child" 2>/dev/null || true
+    return 0
+  fi
+  kill -TERM -- "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null
+  for _ in 1 2 3 4 5; do
+    kill -0 "$child" 2>/dev/null || break
+    sleep 0.2
+  done
+  kill -KILL -- "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null
+  wait "$child" 2>/dev/null || true
+}
+
+cleanup() {
+  local rc=$?
+  trap - EXIT INT TERM HUP
+  # Normal wrapper termination must take the installer group with it, not
+  # just the deadline branch.
+  stop_child
+  if [[ -n $tail_pid ]]; then
+    kill "$tail_pid" 2>/dev/null || true
+    wait "$tail_pid" 2>/dev/null || true
+  fi
+  rm -rf "$tmp"
+  exit "$rc"
+}
+trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
+
+# tail keeps only the final bytes in memory, so a noisy child cannot grow the
+# QML collector; the FIFO means the bounded result is all it ever receives.
+mkfifo "$tmp/stderr" || exit 1
+tail -c 400 <"$tmp/stderr" >"$tmp/error" &
+tail_pid=$!
+
+setsid bash "$root/install.sh" --quiet >/dev/null 2>"$tmp/stderr" &
+child=$!
+
+status=0
+deadline=$((SECONDS + timeout))
+while kill -0 "$child" 2>/dev/null; do
+  if (( SECONDS >= deadline )); then
+    stop_child
+    status=124
+    timed_out=1
+    break
+  fi
+  sleep 0.2
+done
+
+if (( status == 0 )); then
+  wait "$child"
+  status=$?
+fi
+
+# A detached descendant could hold the write end forever; never wait on the
+# filter past a short grace period after the operation itself is finished.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  kill -0 "$tail_pid" 2>/dev/null || break
+  sleep 0.2
+done
+kill "$tail_pid" 2>/dev/null || true
+wait "$tail_pid" 2>/dev/null || true
+cat "$tmp/error" >&2
+# Print the notice last so the service's final 400-character slice keeps it.
+if (( timed_out )); then
+  printf 'chroma: startup installer exceeded %ss; stopped\n' "$timeout" >&2
+fi
+exit "$status"

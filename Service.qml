@@ -51,9 +51,9 @@ Item {
   Process {
     id: installer
     running: false
-    // Pull adw-gtk-theme when missing — plugin add only enables the service;
-    // this is the first real install.sh pass for most users.
-    command: ["bash", root.pluginDir + "/install.sh", "--quiet"]
+    // The wrapper bounds install.sh --quiet: absolute deadline, process-group
+    // cleanup on expiry, and at most 400 bytes of stderr for the collector.
+    command: ["bash", root.pluginDir + "/bin/chroma-boot-install"]
     stderr: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -63,8 +63,10 @@ Item {
       }
     }
     onExited: function (exitCode) {
-      if (exitCode === 0)
+      if (exitCode === 0) {
+        root.lastError = ""
         return
+      }
       console.warn("chroma: installer exited " + exitCode
                    + (root.lastError.length > 0 ? ": " + root.lastError : ""))
     }
@@ -75,8 +77,12 @@ Item {
     running: true
     repeat: false
     onTriggered: {
-      if (!installer.running)
+      if (!installer.running) {
+        // A previous startup may have failed; do not carry its error into a
+        // new attempt that has not reported anything yet.
+        root.lastError = ""
         installer.running = true
+      }
     }
   }
 }

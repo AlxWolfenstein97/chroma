@@ -9,6 +9,7 @@ bad()  { printf 'FAIL %s\n' "$1"; fail=1; }
 
 [[ -x $here/bin/chroma-apply ]] || bad "chroma-apply not executable"
 [[ -x $here/bin/chroma-sync-root ]] || bad "chroma-sync-root not executable"
+[[ -x $here/bin/chroma-boot-install ]] || bad "chroma-boot-install not executable"
 [[ -f $here/manifest.json ]] || bad "manifest.json missing"
 
 # Hermetic apply against a temp theme.
@@ -397,6 +398,106 @@ for d in gtk4ini gtk3ini; do
     || bad "INI snapshot failure: $d original theme lost"
 done
 rm -rf "$f"
+
+# The startup installer wrapper must bound the whole operation, clean up
+# descendants on expiry, and keep captured stderr small. Service.qml runs the
+# wrapper instead of install.sh directly.
+boot=$(mktemp -d)
+mkdir -p "$boot/bin"
+cp "$here/bin/chroma-boot-install" "$boot/bin/"
+cat >"$boot/install.sh" <<'EOF'
+#!/bin/bash
+head -c 100000 /dev/zero | tr '\0' 'x' >&2
+sleep 30 &
+echo "$!" >"$STALL_PID"
+wait
+EOF
+chmod 755 "$boot/install.sh"
+start=$SECONDS
+if CHROMA_BOOT_TIMEOUT=1 STALL_PID="$boot/pid" \
+  bash "$boot/bin/chroma-boot-install" >/dev/null 2>"$boot/err"; then
+  bad "boot installer: stalled child did not time out"
+else
+  rc=$?
+  elapsed=$((SECONDS - start))
+  [[ $rc == 124 ]] \
+    && pass "boot installer: stalled child exits 124" \
+    || bad "boot installer: stalled child exited $rc"
+  (( elapsed <= 10 )) \
+    && pass "boot installer: deadline enforced (${elapsed}s)" \
+    || bad "boot installer: deadline overrun (${elapsed}s)"
+  stalled=$(cat "$boot/pid" 2>/dev/null || true)
+  if [[ -n $stalled ]] && kill -0 "$stalled" 2>/dev/null; then
+    bad "boot installer: descendant $stalled survived"
+  else
+    pass "boot installer: descendants cleaned up"
+  fi
+  tail -c 400 "$boot/err" | grep -q 'exceeded 1s' \
+    && pass "boot installer: timeout notice survives a noisy child" \
+    || bad "boot installer: timeout notice was truncated"
+fi
+
+# Cancelling the wrapper (not just reaching the deadline) must also signal and
+# reap the installer group.
+cat >"$boot/install.sh" <<'EOF'
+#!/bin/bash
+sleep 30 &
+echo "$$" >"$INSTALLER_PID"
+echo "$!" >"$STALL_PID"
+wait
+EOF
+chmod 755 "$boot/install.sh"
+INSTALLER_PID="$boot/installer.pid" STALL_PID="$boot/pid" \
+  bash "$boot/bin/chroma-boot-install" >/dev/null 2>/dev/null &
+wrapper=$!
+for _ in $(seq 1 50); do
+  if [[ -s $boot/installer.pid && -s $boot/pid ]]; then
+    break
+  fi
+  sleep 0.1
+done
+kill -TERM "$wrapper" 2>/dev/null || true
+wait "$wrapper" 2>/dev/null || true
+sleep 0.3
+for name in installer pid; do
+  pid=$(cat "$boot/$name" 2>/dev/null || true)
+  if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
+    bad "boot installer: $name survived cancellation"
+  else
+    pass "boot installer: $name cleaned up on cancellation"
+  fi
+done
+
+cat >"$boot/install.sh" <<'EOF'
+#!/bin/bash
+head -c 100000 /dev/zero | tr '\0' 'x' >&2
+echo "final line" >&2
+EOF
+if CHROMA_BOOT_TIMEOUT=10 bash "$boot/bin/chroma-boot-install" >/dev/null 2>"$boot/err2"; then
+  size=$(wc -c <"$boot/err2")
+  (( size <= 400 )) \
+    && pass "boot installer: stderr bounded to ${size} bytes" \
+    || bad "boot installer: stderr grew to ${size} bytes"
+  grep -q 'final line' "$boot/err2" \
+    && pass "boot installer: keeps the last stderr line" \
+    || bad "boot installer: lost the last stderr line"
+else
+  bad "boot installer: noisy child failed"
+fi
+
+cat >"$boot/install.sh" <<'EOF'
+#!/bin/bash
+echo "boom" >&2
+exit 7
+EOF
+if CHROMA_BOOT_TIMEOUT=10 bash "$boot/bin/chroma-boot-install" >/dev/null 2>/dev/null; then
+  bad "boot installer: child exit status swallowed"
+else
+  [[ $? == 7 ]] \
+    && pass "boot installer: child exit status propagated" \
+    || bad "boot installer: child exit status changed"
+fi
+rm -rf "$boot"
 
 # Validate manifest against omarchy if available
 if command -v omarchy >/dev/null 2>&1; then

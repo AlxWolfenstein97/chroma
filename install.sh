@@ -129,7 +129,8 @@ if (( arm_theme_hook )); then touch "$state/armed-theme-hook"; else rm -f "$stat
 if (( arm_style_menu )); then touch "$state/armed-style-menu"; else rm -f "$state/armed-style-menu"; fi
 
 chmod 755 "$here/bin/chroma-apply" "$here/bin/chroma-sync-root" \
-  "$here/bin/chroma-link-root" "$here/omarchy/theme-set-hook" 2>/dev/null || true
+  "$here/bin/chroma-link-root" "$here/bin/chroma-boot-install" \
+  "$here/omarchy/theme-set-hook" 2>/dev/null || true
 
 # ------------------------------------------------------------------ packages
 # adw-gtk-theme: GTK3 apps only honour libadwaita-style @define-color variables
