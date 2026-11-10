@@ -24,16 +24,20 @@ timed_out=0
 
 stop_child() {
   [[ -n $child ]] || return 0
-  if ! kill -0 "$child" 2>/dev/null; then
-    wait "$child" 2>/dev/null || true
-    return 0
+  # Signal the whole group even if the leader is already gone: descendants can
+  # outlive it while still sharing its PGID. Probing the leader with kill -0
+  # would miss them, so only the group signal decides whether work remains.
+  if kill -TERM -- "-$child" 2>/dev/null; then
+    for _ in 1 2 3 4 5; do
+      kill -0 -- "-$child" 2>/dev/null || break
+      sleep 0.2
+    done
+    kill -KILL -- "-$child" 2>/dev/null || true
+    for _ in 1 2 3 4 5; do
+      kill -0 -- "-$child" 2>/dev/null || break
+      sleep 0.1
+    done
   fi
-  kill -TERM -- "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null
-  for _ in 1 2 3 4 5; do
-    kill -0 "$child" 2>/dev/null || break
-    sleep 0.2
-  done
-  kill -KILL -- "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null
   wait "$child" 2>/dev/null || true
 }
 
@@ -80,6 +84,10 @@ if (( status == 0 )); then
   wait "$child"
   status=$?
 fi
+
+# The leader may have exited while leaving descendants in its group; clear
+# them before waiting on the stderr filter so the pipe closes promptly.
+stop_child
 
 # A detached descendant could hold the write end forever; never wait on the
 # filter past a short grace period after the operation itself is finished.

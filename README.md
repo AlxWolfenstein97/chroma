@@ -217,11 +217,12 @@ mockups; that is a separate dep family.
    through `bin/chroma-boot-install` (restores the theme-set hook if already
    armed; skips package installs — deps are interactive / `arm-all` /
    `install.sh --yes`). The wrapper gives the whole run an absolute deadline
-   and stops the full process group if a lock or child command stalls, so a
-   hung startup can never pin the shell. Only the last 400 bytes of installer
-   stderr are retained for the service log. It does **not** probe-and-reapply
-   on a timer — the hook already covers switches, and a second path made
-   boots/theme flips feel heavier than they needed to.
+   and stops the full process group on expiry, cancellation, or when the
+   installer leader exits with descendants still in its group, so a hung or
+   orphaned startup can never pin the shell. Only the last 400 bytes of
+   installer stderr are retained for the service log. It does **not**
+   probe-and-reapply on a timer — the hook already covers switches, and a
+   second path made boots/theme flips feel heavier than they needed to.
 5. Windowless GTK daemons (`--gapplication-service`) are restarted when they
    have no open window, so open apps are never killed mid-use. In wrapper mode
    the GTK portal is *not* bounced — it live-updates, and killing it would

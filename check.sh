@@ -468,6 +468,34 @@ for name in installer pid; do
   fi
 done
 
+# A descendant can outlive the installer leader while staying in its process
+# group; cleanup must signal the group, not just probe the leader PID.
+cat >"$boot/install.sh" <<'EOF'
+#!/bin/bash
+sleep 30 &
+echo "$!" >"$STALL_PID"
+exit 0
+EOF
+chmod 755 "$boot/install.sh"
+start=$SECONDS
+if CHROMA_BOOT_TIMEOUT=10 STALL_PID="$boot/pid" \
+  bash "$boot/bin/chroma-boot-install" >/dev/null 2>"$boot/err3"; then
+  pass "boot installer: leader exit returns success"
+else
+  bad "boot installer: leader exit returned failure"
+fi
+elapsed=$((SECONDS - start))
+(( elapsed <= 5 )) \
+  && pass "boot installer: leader exit returns promptly (${elapsed}s)" \
+  || bad "boot installer: leader exit hung (${elapsed}s)"
+sleep 0.2
+orphan=$(cat "$boot/pid" 2>/dev/null || true)
+if [[ -n $orphan ]] && kill -0 "$orphan" 2>/dev/null; then
+  bad "boot installer: descendant $orphan survived leader exit"
+else
+  pass "boot installer: descendant cleaned up after leader exit"
+fi
+
 cat >"$boot/install.sh" <<'EOF'
 #!/bin/bash
 head -c 100000 /dev/zero | tr '\0' 'x' >&2
