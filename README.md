@@ -5,9 +5,9 @@ one-sweep: it paints the GTK and Qt *pipelines* most desktop apps already
 use, so dozens of programs pick up the active theme without an Appearance picker
 or a per-app skin.**
 
-![Chroma on Hackerman — Files, Document Viewer, and BleachBit wearing the theme](preview.png)
+![Chroma on Hackerman — Files, Papers, BleachBit, and qBittorrent wearing the theme](preview.png)
 
-Stock Omarchy flips Nautilus, BleachBit, Evince and friends between light and
+Stock Omarchy flips Nautilus, BleachBit, Papers and friends between light and
 dark Adwaita. That is all they ever get: the same default gray in every theme.
 Your desktop wears Hackerman neon; your file manager wears beige.
 
@@ -46,7 +46,7 @@ Theme authors are free to mention these as extenders in their repos — or not. 
 
 ### Why GTK & Qt (pipelines, not apps)
 
-Most “apps” on a Linux desktop are not custom paint engines. They speak **GTK** or **Qt**. Recolor those pipelines and you recolor Nautilus, Evince, BleachBit, File Roller, qBittorrent, qpwgraph, and a long tail of friends in one shot — without asking each upstream for a theme file.
+Most “apps” on a Linux desktop are not custom paint engines. They speak **GTK** or **Qt**. Recolor those pipelines and you recolor Nautilus, Papers, BleachBit, File Roller, qBittorrent, qpwgraph, and a long tail of friends in one shot — without asking each upstream for a theme file.
 
 That is the opposite of shipping a skin for OBS (where a real theme format exists — see OmaOBS) or patching Chromium / Steam / a website. Those either have no stable color contract, own their own UI chrome, or update on someone else’s schedule. Fighting that is a cat-and-mouse game with people who never asked for your patches; asking strangers to install your fork of Chromium or Steam is weirder still. Websites are worse: content CSS is not your desktop.
 
@@ -56,7 +56,7 @@ Inspired by [Accord](https://github.com/vonsensey/accord), which proved the GTK 
 
 ## What you get
 
-- **GTK4 / libadwaita** — Nautilus, Evince, Calendar, Text Editor, Loupe, …
+- **GTK4 / libadwaita** — Nautilus, Papers, Calendar, Text Editor, Loupe, …
   via `~/.config/gtk-4.0/gtk.css` (the only user lever libadwaita honors).
   Restart-only.
 - **GTK3 — live** — a generated theme under
@@ -301,7 +301,7 @@ active theme name instead of only rewriting user CSS. What still lags is
 documented below; we never kill a window that is in use to force a repaint.
 
 - **GTK4 / libadwaita** — reads `~/.config/gtk-4.0/gtk.css` once per process.
-  Nautilus, Evince, Calendar, Text Editor, Loupe and friends need a restart
+  Nautilus, Papers, Calendar, Text Editor, Loupe and friends need a restart
   after a switch. This is the one remaining restart-only toolkit.
 - **GTK3 apps built on libhandy** — GNOME Disks and Document Viewer are the
   common ones. Light switches keep following live, but **any** switch to a dark
@@ -386,6 +386,10 @@ bash ~/.config/omarchy/plugins/io.github.alxwolfenstein97.chroma/check.sh
   [OmaVT](https://github.com/AlxWolfenstein97/omavt),
   [OmaTTY](https://github.com/AlxWolfenstein97/omatty),
   [OmaHud](https://github.com/AlxWolfenstein97/omahud).
+- Browser side: **[OmaWeb](https://github.com/AlxWolfenstein97/omaweb)** —
+  reshapes the official Catppuccin userstyles bundle to the active
+  `colors.toml` and hands it to Stylus, with an optional Dark Reader export.
+  Manual by design: no Appearance row and no family boom.
 - Already solved elsewhere (gladly):
   - **[Omacord](https://github.com/ASwenia/omacord)** — Vesktop / Vencord Discord
     follows Omarchy themes live. No theme carousel / mockup picker: it **syncs**,
